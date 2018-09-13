@@ -1,4 +1,4 @@
-# TatSu - VS Code Extension
+# 竜 TatSu - VS Code Extension
 
 ## Features
 

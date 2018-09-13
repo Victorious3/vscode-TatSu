@@ -13,7 +13,7 @@
     "activationEvents": [
         "onLanguage:tatsu"
     ],
-    "main": "./out/tatsuMain",
+    "main": "./client/out/tatsuClient",
     "contributes": {
         "commands": [],
         "languages": [
@@ -39,11 +39,13 @@
         ]
     },
     "scripts": {
-        "vscode:prepublish": "npm run compile",
-        "compile": "tsc -p ./",
-        "watch": "tsc -watch -p ./",
-        "postinstall": "node ./node_modules/vscode/bin/install",
-        "test": "npm run compile && node ./node_modules/vscode/bin/test"
+        "vscode:prepublish": "cd client && npm run update-vscode && cd .. && npm run compile",
+        "compile:client": "tsc -p ./client/tsconfig.json",
+        "compile:server": "tsc -p ./server/tsconfig.json",
+        "watch:client": "tsc -w -p ./client/tsconfig.json",
+        "watch:server": "tsc -w -p ./server/tsconfig.json",
+        "compile": "npm run compile:client && npm run compile:server",
+        "postinstall": "cd client && npm install && cd ../server && npm install && cd .."
     },
     "devDependencies": {
         "typescript": "^2.6.1",
