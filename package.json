@@ -19,7 +19,10 @@
         "languages": [
             {
                 "id": "tatsu",
-                "aliases": ["TatSu", "tatsu"],
+                "aliases": [
+                    "TatSu",
+                    "tatsu"
+                ],
                 "extensions": [
                     ".tatsu",
                     ".ebnf"

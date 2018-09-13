@@ -3,11 +3,23 @@
 	"scopeName": "source.tatsu",
 	"patterns": [
 		{
-			"name": "keyword.control.tatsu",
-			"match": "(@@).*(?=::)",
-			"captures": {
-				"1": {"name": "punctuation.definition.keyword.tatsu"}
-			}
+			"name": "meta.tatsu.directive",
+			"begin": "(@@.*)(::)",
+			"beginCaptures": {
+				"1": {
+					"name": "keyword.control.tatsu",
+					"match": "(@@)(.*)",
+					"captures": {
+						"1": { "name": "punctuation.definition.keyword.tatsu" }
+					}
+				},
+				"2": {"name": "punctuation.separator.directive.tatsu"}
+			},
+			"end": "\\n",
+			"patterns": [
+				{ "include": "#literal" },
+				{ "include": "#unquoted" }
+			]
 		},
 		{
 			"name": "keyword.control.tatsu",
@@ -16,47 +28,235 @@
 				"1": {"name": "punctuation.definition.keyword.tatsu"}
 			}
 		},
-		{ "include": "#block_comment" },
 		{
-			"name": "keyword.control.import.tatsu",
-			"match": "#include\\s*::"
+			"begin": "(#include)\\s*(::)",
+			"beginCaptures": {
+				"1": {"name": "keyword.control.import.tatsu"},
+				"2": {"name": "punctuation.separator.directive.tatsu"}
+			},
+			"end": "\\n",
+			"patterns": [
+				{ "include": "#string" },
+				{ "include": "#unquoted" }
+			]
 		},
+		{ "include": "#comment" },
 		{
 			"name": "comment.line.shebang.tatsu",
 			"match": "#.*$"
 		},
 		{
-			"name": "meta.tatsu.syntax-rule",
-			"begin": "(?!\\d)(\\w+)((::)(\\w+))*\\s*=",
-			"end": ";",
+			"name": "meta.tatsu.rule",
+			"begin": "(?!\\d)(\\w+)",
 			"beginCaptures": {
-				"1": {"name": "entity.name.function.tatsu"},
-				"4": {"name": "entity.name.type.tatsu"}
+				"1": {"name": "entity.name.function.tatsu"}
+			},
+			"end": ";",
+			"endCaptures": {
+				"0": { "name": "punctuation.terminator.tatsu" }
 			},
 			"patterns": [
-				{ "include": "#block_comment" },
 				{
-					"name": "keyword.operator.tatsu",
-					"match": "[~+*%\\.]"
+					"name": "meta.tatsu.based-rule",
+					"patterns": [
+						{
+							"match": "(<)\\s*(\\w+)",
+							"captures": {
+								"1": { "name": "punctuation.separator.base.tatsu" },
+								"2": { "name": "variable.function.tatsu" }
+							}
+						}
+					]
 				},
 				{
-					"name": "string.quoted.double.tatsu",
-					"begin": "\"",
-					"end": "\""
+					"name": "meta.tatsu.type-argument",
+					"patterns": [
+						{
+							"match": "(::)\\s*(\\w+)",
+							"captures": {
+								"1": { "name": "punctuation.separator.type.tatsu" },
+								"2": { "name": "entity.name.type.tatsu" }
+							}
+						}
+					]
 				},
 				{
-					"name": "string.quoted.single.tatsu",
-					"begin": "'",
-					"end": "'"
+					"name": "meta.tatsu.rule-arguments",
+					"begin": "\\(",
+					"end": "\\)",
+					"patterns": [
+						{
+							"begin": "(?!\\d)(\\w+)\\s*=",
+							"beginCaptures": {
+								"1" : { "name": "variable.parameter.tatsu" }
+							},
+							"end": "(?=[,\\)])",
+							"patterns": [
+								{ "include": "#literal" },
+								{ "include": "#unquoted" }
+							]
+						},
+						{ "include": "#literal" },
+						{ "include": "#unquoted" },
+						{ "match": ",", "name": "punctuation.separator" }
+					]
+				},
+				{
+					"name": "meta.tatsu.rule-arguments",
+					"begin": ",",
+					"end": "(?==)",
+					"patterns": [
+						{ "include": "#literal" },
+						{ "include": "#unquoted" },
+						{ "match": ",", "name": "punctuation.separator" }
+					]
+				},
+				{
+					"name": "meta.tatsu.rule-body",
+					"begin": "=",
+					"beginCaptures": { "0": "punctiation.separator.rule.tatsu"},
+					"end": "(?=;)",
+					"patterns": [
+						{ "include": "#comment" },
+						{
+							"name": "keyword.operator.tatsu",
+							"match": "[~+*%\\.>!?|]"
+						},
+						{
+							"name": "variable.language.tatsu",
+							"match": "@[+]?|\\$"
+						},
+						{ "include": "#literal" },
+						{ "include": "#constant" },
+						{
+							"match": "(\\w+)(?=(\\s*\\+)?\\s*:)",
+							"name": "entity.name.tag.tatsu"
+						},
+						{
+							"name": "variable.function.tatsu",
+							"match": "(?!\\d)(\\w+)"
+						}
+					]
 				}
+				
 			]
 		}
 	],
 	"repository": {
-		"block_comment": {
-			"name": "comment.block.tatsu",
-			"begin": "\\(\\*",
-			"end": "\\*\\)"
+		"comment": {
+			"patterns": [
+				{
+					"name": "comment.line.shebang.tatsu",
+					"match": "#.*$"
+				},
+				{
+					"name": "comment.block.tatsu",
+					"begin": "\\(\\*",
+					"end": "\\*\\)"
+				}
+			]
+		},
+		"literal": {
+			"patterns": [
+				{ "include": "#string" },
+				{ "include": "#regex" },
+				{ "include": "#number"},
+				{ "include": "#boolean"}
+			]
+		},
+		"constant": {
+			"name": "constant.other.tatsu",
+			"begin": "`",
+			"beginCaptures": {
+				"0": {"name": "punctuation.constant.other.begin.tatsu"}
+			},
+			"end": "`",
+			"endCaptures": {
+				"0": {"name": "punctuation.constant.other.end.tatsu"}
+			},
+			"patterns": [
+				{ "include": "#literal" },
+				{ "include": "#unquoted" }
+			]
+		},
+		"regex": {
+			"name": "string.regexp.tatsu",
+			"begin": "/",
+			"beginCaptures": {
+				"0": {"name": "punctuation.definition.string.regexp.begin.tatsu"}
+			},
+			"end": "/",
+			"endCaptures": {
+				"0": {"name": "punctuation.definition.string.regexp.end.tatsu"}
+			},
+			"patterns": [
+				{
+					"name": "constant.character.escape.tatsu",
+					"match": "\\\\[\\\\/]"
+				}
+			]
+		},
+		"string": {
+			"patterns": [
+				{
+					"name": "string.quoted.double.tatsu",
+					"begin": "r?\"",
+					"beginCaptures": {
+						"0": {"name": "punctuation.definition.string.begin.tatsu"}
+					},
+					"end": "\"",
+					"endCaptures": {
+						"0": {"name": "punctuation.definition.string.end.tatsu"}
+					},
+					"patterns": [
+						{
+							"name": "constant.character.escape.tatsu",
+							"match": "\\\\[\\\\\"]"
+						}
+					]
+				},
+				{
+					"name": "string.quoted.single.tatsu",
+					"begin": "r?'",
+					"beginCaptures": {
+						"0": {"name": "punctuation.definition.string.begin.tatsu"}
+					},
+					"end": "'",
+					"endCaptures": {
+						"0": {"name": "punctuation.definition.string.end.tatsu"}
+					},
+					"patterns": [
+						{
+							"name": "constant.character.escape.tatsu",
+							"match": "\\\\[\\\\']"
+						}
+					]
+				}
+			]
+		},
+		"number": {
+			"patterns": [
+				{
+					"name": "constant.numeric.hex.tatsu",
+					"match": "0[xX](\\d|[a-fA-F])+"
+				},
+				{
+					"name": "constant.numeric.float.tatsu",
+					"match": "[-+]?(?:\\d+\\.\\d*|\\d*\\.\\d+)(?:[Ee][-+]?\\d+)?"
+				},
+				{
+					"name": "constant.numeric.integer.tatsu",
+					"match": "[-+]?\\d+"
+				}
+			]
+		},
+		"boolean": {
+			"name": "constant.language.boolean.tatsu",
+			"match": "True|False"
+		},
+		"unquoted": {
+			"name": "string.unquoted.tatsu",
+			"match": "(?!\\d)(\\w+)(?<!True|False)"
 		}
 	}
-}
+}  
