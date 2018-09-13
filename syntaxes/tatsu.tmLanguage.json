@@ -1,0 +1,62 @@
+{
+	"name": "TatSu",
+	"scopeName": "source.tatsu",
+	"patterns": [
+		{
+			"name": "keyword.control.tatsu",
+			"match": "(@@).*(?=::)",
+			"captures": {
+				"1": {"name": "punctuation.definition.keyword.tatsu"}
+			}
+		},
+		{
+			"name": "keyword.control.tatsu",
+			"match": "(@).*",
+			"captures": {
+				"1": {"name": "punctuation.definition.keyword.tatsu"}
+			}
+		},
+		{ "include": "#block_comment" },
+		{
+			"name": "keyword.control.import.tatsu",
+			"match": "#include\\s*::"
+		},
+		{
+			"name": "comment.line.shebang.tatsu",
+			"match": "#.*$"
+		},
+		{
+			"name": "meta.tatsu.syntax-rule",
+			"begin": "(?!\\d)(\\w+)((::)(\\w+))*\\s*=",
+			"end": ";",
+			"beginCaptures": {
+				"1": {"name": "entity.name.function.tatsu"},
+				"4": {"name": "entity.name.type.tatsu"}
+			},
+			"patterns": [
+				{ "include": "#block_comment" },
+				{
+					"name": "keyword.operator.tatsu",
+					"match": "[~+*%\\.]"
+				},
+				{
+					"name": "string.quoted.double.tatsu",
+					"begin": "\"",
+					"end": "\""
+				},
+				{
+					"name": "string.quoted.single.tatsu",
+					"begin": "'",
+					"end": "'"
+				}
+			]
+		}
+	],
+	"repository": {
+		"block_comment": {
+			"name": "comment.block.tatsu",
+			"begin": "\\(\\*",
+			"end": "\\*\\)"
+		}
+	}
+}

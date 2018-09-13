@@ -1,0 +1,52 @@
+{
+    "name": "tatsu",
+    "displayName": "TatSu",
+    "description": "Syntax highlighting for TatSu grammar files",
+    "version": "0.0.1",
+    "publisher": "neogeny",
+    "engines": {
+        "vscode": "^1.27.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "activationEvents": [
+        "onLanguage:tatsu"
+    ],
+    "main": "./out/tatsuMain",
+    "contributes": {
+        "commands": [],
+        "languages": [
+            {
+                "id": "tatsu",
+                "aliases": ["TatSu", "tatsu"],
+                "extensions": [
+                    ".tatsu",
+                    ".ebnf"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "tatsu",
+                "scopeName": "source.tatsu",
+                "path": "./syntaxes/tatsu.tmLanguage.json"
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "postinstall": "node ./node_modules/vscode/bin/install",
+        "test": "npm run compile && node ./node_modules/vscode/bin/test"
+    },
+    "devDependencies": {
+        "typescript": "^2.6.1",
+        "vscode": "^1.1.21",
+        "tslint": "^5.8.0",
+        "@types/node": "^8.10.25",
+        "@types/mocha": "^2.2.42"
+    }
+}
