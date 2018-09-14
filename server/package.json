@@ -5,7 +5,9 @@
 		"node": "*"
 	},
 	"dependencies": {
-		"vscode-languageserver": "^5.1.0"
+		"vscode-languageserver": "^5.1.0",
+		"xregexp": "^4.2.0",
+		"@types/xregexp": "^3.0.29"
 	},
 	"scripts": {}
 }

@@ -10,8 +10,10 @@ import {
 	InitializeParams,
 	CompletionItem,
 	CompletionItemKind,
-	TextDocumentPositionParams
+	TextDocumentPositionParams,
+	Range
 } from 'vscode-languageserver';
+import XRegExp = require('xregexp');
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -42,18 +44,125 @@ documents.onDidChangeContent(change => {
 	validate(change.document);
 });
 
+const RE_STRUCTURE = XRegExp(`
+	(
+		@@(?<directive>.*)(\\n|$)
+	)|(
+		[#]include(?<include>.*)(\\n|$)
+	)|(
+		(?!\\d)(?<rulename>\\w+)[^=]*=[^;]*;
+	)|(
+		[#].*(\\n|$)
+	)|(
+		\\(\\*(.|\\n)*\\*\\)
+	)|(.|\\n)
+`, 'xgm');
+
+// XRegExp's exec is painfully slow
+const DIRECTIVE = 1
+const INCLUDE = 5
+const RULENAME = 8
+
+const RE_ARGS = XRegExp("(\\s+)|(\\S+)", 'g');
+const RE_KEYWORD = XRegExp("(?!\\d)(\\w+)");
+
+interface CacheEntry {
+	rules: string[];
+	keywords: string[];
+	lines: string[];
+}
+
+let cachedFiles = new Map<string, CacheEntry>();
+
 async function validate(textDocument: TextDocument): Promise<void> {
+	function range(start: number, end: number): Range {
+		return {start: textDocument.positionAt(start), end: textDocument.positionAt(end)};
+	}
+
+	let text = textDocument.getText();
+
+	let diagnostics: Diagnostic[] = [];
+	let keywords: string[] = [];
+	let rules: string[] = [];
 	
+	let index = 0;
+	let structure: any;
+	while (structure = RE_STRUCTURE.exec(text)!) {
+		if (structure[DIRECTIVE]) {
+			let i = index + 2;
+			let s = structure[DIRECTIVE].split("::");
+			let name: string = s[0];
+			i += name.length;
+			if (name.trim() === "keyword") {
+				let args = s[1];
+				let arg: any;
+				while (arg = RE_ARGS.exec(args)!) {
+					let argv = arg[1];
+					if (argv) {
+						if (RE_KEYWORD.test(argv)) {
+							keywords.push(argv);
+						} else {
+							diagnostics.push({
+								severity: DiagnosticSeverity.Error, 
+								range: range(i, i + argv.length),
+								message: "Invalid keyword"
+							});
+						}
+					}
+					i += arg[0].length;
+				}
+			}
+
+		} else if(structure[RULENAME]) {
+			rules.push(structure[RULENAME]);
+		}
+
+		index += structure.index;
+	}
+	// connection.console.log("Rules: " + rules.join(", "));
+
+	let cacheEntry: CacheEntry = {
+		keywords: keywords,
+		rules: rules,
+		lines: text.split("\n")
+	};
+
+	cachedFiles.set(textDocument.uri, cacheEntry);
+
+	connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
 }
 
 // connection.onDidChangeWatchedFiles(_change => {});
 
 // This handler provides the initial list of the completion items.
 connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[] => {
-		// The pass parameter contains the position of the text document in
-		// which code complete got requested. For the example we ignore this
-		// info and always provide the same completion items.
-		return [];
+		let cachedFile = cachedFiles.get(position.textDocument.uri);
+		if (!cachedFile) {
+			return [];
+		}
+		let line = cachedFile.lines[position.position.line];
+		let start_pos = position.position.character;
+		let pos = start_pos;
+
+		let items: CompletionItem[] = [];
+
+
+		while (pos > 0 && /\w/.test(line.charAt(pos - 1))) {
+			pos -= 1;
+		}
+		let word = line.substring(pos, start_pos);
+		if (word.startsWith("@")) {
+
+		} else {
+			for (let rule of cachedFile.rules) {
+				if (rule.startsWith(word)) {
+					items.push({label: rule, kind: CompletionItemKind.Function});
+				}
+			}
+		}
+
+		
+		return items;
 	}
 );
 
