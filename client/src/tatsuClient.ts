@@ -1,7 +1,7 @@
 'use strict';
 
 import * as path from 'path';
-import { workspace, ExtensionContext } from 'vscode';
+import * as vscode from 'vscode';
 
 import {
 	LanguageClient,
@@ -12,7 +12,14 @@ import {
 
 let client: LanguageClient;
 
-export function activate(context: ExtensionContext) {
+export function activate(context: vscode.ExtensionContext) {
+
+	context.subscriptions.push(
+		vscode.languages.setLanguageConfiguration('tatsu', {
+			wordPattern: /(@@?\w*)|(\w+)/
+		})
+	);
+
 	// The server is implemented in node
 	let serverModule = context.asAbsolutePath(
 		path.join('server', 'out', 'tatsuServer.js')
@@ -34,11 +41,7 @@ export function activate(context: ExtensionContext) {
 
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {
-		documentSelector: [{ scheme: 'file', language: 'tatsu' }],
-		synchronize: {
-			// Notify the server about file changes to '.clientrc files contained in the workspace
-			fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-		}
+		documentSelector: [{ scheme: 'file', language: 'tatsu' }]
 	};
 
 	// Create the language client and start the client.
