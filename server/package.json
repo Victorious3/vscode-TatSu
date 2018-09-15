@@ -6,6 +6,7 @@
 	},
 	"dependencies": {
 		"vscode-languageserver": "^5.1.0",
+		"vscode-textmate": "^4.0.1",
 		"xregexp": "^4.2.0",
 		"@types/xregexp": "^3.0.29"
 	},

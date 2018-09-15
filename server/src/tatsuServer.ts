@@ -15,8 +15,6 @@ import {
 	DiagnosticSeverity
 } from 'vscode-languageserver';
 
-import { RE_COMMENTS, RE_STRUCTURE, Argument, ArgumentType, parseArguments } from './parse';
-
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
 let connection = createConnection(ProposedFeatures.all);
