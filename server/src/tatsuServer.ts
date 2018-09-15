@@ -5,16 +5,17 @@ import {
 	TextDocuments,
 	TextDocument,
 	Diagnostic,
-	DiagnosticSeverity,
 	ProposedFeatures,
 	InitializeParams,
 	CompletionItem,
 	CompletionItemKind,
 	TextDocumentPositionParams,
 	Position,
-	Range
+	Range,
+	DiagnosticSeverity
 } from 'vscode-languageserver';
-import XRegExp = require('xregexp');
+
+import { RE_COMMENTS, RE_STRUCTURE, Argument, ArgumentType, parseArguments } from './parse';
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -45,81 +46,40 @@ documents.onDidChangeContent(change => {
 	validate(change.document);
 });
 
-const TEMPLATE_STRINGLIT = "(%([^%\\\\]|\\\\.)*%)";
-const RE_STRING_LIT = `
-	`+TEMPLATE_STRINGLIT.replace(/%/g, "\"")+` 
-	| `+TEMPLATE_STRINGLIT.replace(/%/g, "'")+` 
-	| `+TEMPLATE_STRINGLIT.replace(/%/g, "/")+`
-`;
-
-const RE_INLINE_COMMENT = "[#].*(\\n|$)";
-const RE_MULTILINE_COMMENT = "\\(\\*(.|[\\r\\n]+)*?\\*\\)";
-
-const RE_COMMENTS = XRegExp(`
-	(?<inline_comment>`+RE_INLINE_COMMENT+`)	   |
-	(?<multiline_comment>`+RE_MULTILINE_COMMENT+`) |
-	(?<newline>\\n)                                | 
-	(?<string>`+RE_STRING_LIT+`)
-`, 'xgm');
-const INLINE_COMMENT = 1;
-const MULTILINE_COMMENT = 3;
-const STRING = 6;
-
-console.log(RE_COMMENTS.toString());
-
-const RE_STRUCTURE = XRegExp(`
-	(@@(?<directive>.*)(\\n|$))            |
-	([#]include(?<include>.*)(\\n|$))      |
-	((?!\\d)(?<rulename>\\w+)[^=]*=[^;]*;) | 
-	(`+RE_INLINE_COMMENT+`)                |
-	(`+RE_MULTILINE_COMMENT+`)
-`, 'xgm');
-const DIRECTIVE = 1;
-const INCLUDE = 5;
-const RULENAME = 8;
-
-const RE_ARGS = XRegExp("(\\s+)|(\\S+)", 'g');
-const RE_KEYWORD = XRegExp("(?!\\d)(\\w+)");
-
 function countLines(str: string) {
 	return str.split("\n").length - 1;
 }
 
-class Comment {
-	start?: number;
-	end?: number;
-
-	constructor(start?: number, end?: number) {
-		this.start = start;
-		this.end = end;
-	}
-
-	test(n: number): boolean {
-		if (this.start !== undefined) {
-			if (n < this.start) { return false; }
-		}
-		if (this.end !== undefined) {
-			if (n > this.end) { return false; }
-		}
-		return true;
-	}
+function testIn(pos: Position, range: Range): boolean {
+	return pos.line <= range.start.line && pos.line >= range.end.line &&
+		pos.character <= range.start.character && pos.character >= range.end.character;
 }
 
 class LineInfo {
-	line: string;
-	comments: Comment[] = [];
+	text: string;
+	comments: Range[] = [];
+	line: number;
 
-	constructor(line: string) {
+	constructor(text: string, line: number) {
+		this.text = text;
 		this.line = line;
 	}
 
-	isCommentAt(n: number): boolean {
+	isCommentAt(character: number): boolean {
 		for (let comment of this.comments) {
-			if (comment.test(n)) {
+			if (testIn(Position.create(this.line, character), comment)) {
 				return true;
 			}
 		}
 		return false;
+	}
+	
+	charRange(start: number, end: number): Range {
+		return Range.create(this.line, start, this.line, end);
+	}
+
+	addComment(start: number, end: number) {
+		this.comments.push(this.charRange(start, end));
 	}
 }
 
@@ -145,83 +105,91 @@ let cachedFiles = new Map<string, CacheEntry>();
 
 async function validate(textDocument: TextDocument): Promise<void> {
 	let text = textDocument.getText();
-	let lines = text.split("\n").map(l => new LineInfo(l));
+	let lines = text.split("\n").map((v, i) => new LineInfo(v, i));
 
 	let diagnostics: Diagnostic[] = [];
 	let keywords: CompletionItem[] = [];
 	let rules: RuleInfo[] = [];
-	
-	let match: any;
-	while (match = RE_STRUCTURE.exec(text)!) {
-		let pos = textDocument.positionAt(match.index);
 
-		if (match[DIRECTIVE]) {
-			let i = pos.character + 2;
-			let s = match[DIRECTIVE].split("::");
-			let name: string = s[0];
-			i += name.length;
-			if (name.trim() === "keyword") {
-				let args = s[1];
-				let arg: any;
-				while (arg = RE_ARGS.exec(args)!) {
-					let argv = arg[1];
-					if (argv) {
-						if (RE_KEYWORD.test(argv)) {
-							keywords.push({label: argv, kind: CompletionItemKind.Constant});
-						} else {
-							diagnostics.push({
-								severity: DiagnosticSeverity.Error, 
-								range: {
-									start: Position.create(pos.line, i),
-									end: Position.create(pos.line, i + argv.length)
-								},
-								message: "Invalid keyword"
-							});
-						}
-					}
-					i += arg[0].length;
+	function parseDirective(name: string, args: Argument[]) {
+		if (name === "@@keyword") {
+			for (let arg of args) {
+				if (arg.type === ArgumentType.RAW_STRING || arg.type === ArgumentType.STRING) {
+					console.log(arg.value)
+					keywords.push({label: arg.value as string, kind: CompletionItemKind.Value});
+				} else {
+					diagnostics.push({
+						message: "Invalid keyword",
+						range: arg.range,
+						severity: DiagnosticSeverity.Warning
+					});
 				}
 			}
-
-		} else if(match[RULENAME]) {
-			let name = match[RULENAME];
-			rules.push(new RuleInfo(
-				name, Range.create(pos, textDocument.positionAt(match.index + match[0].length))
-			));
 		}
 	}
+		
+	let match: any;
 
 	// Compute comment positions
-	while (match = RE_COMMENTS.exec(text)!) {
+	while (match = RE_COMMENTS.regex.exec(text)!) {
 		let pos = textDocument.positionAt(match.index);
 
-		if (match[MULTILINE_COMMENT]) {
+		if (match[RE_COMMENTS.multiline_comment]) {
 			let nl = countLines(match[0]);
 			// connection.console.log("Found multiline comment at " + pos.line + " length " + (nl + 1));
 			
 			if (nl === 0) {
-				lines[pos.line].comments.push(new Comment(pos.character + 1, pos.character + match[0].length - 1));
+				lines[pos.line].addComment(pos.character + 1, pos.character + match[0].length - 1);
 			} else {
 				// First line
-				lines[pos.line].comments.push(new Comment(lines[pos.line].line.lastIndexOf("(*") + 1));
+				lines[pos.line].addComment(lines[pos.line].text.lastIndexOf("(*") + 1, lines[pos.line].text.length);
 				// Last line
-				lines[pos.line + nl].comments.push(new Comment(0, lines[pos.line].line.indexOf("*)") + 1));
+				lines[pos.line + nl].addComment(0, lines[pos.line].text.indexOf("*)") + 1);
 			}
 			if (nl > 2) {
 				let l = nl - 1;
 				while (l--) {
+					let lp = pos.line + l + 1;
 					// mark all lines
-					lines[pos.line + l + 1].comments.push(new Comment(0));
+					lines[lp].addComment(0, lines[lp].text.length);
 				}
 			}
 
 			
-		} else if (match[INLINE_COMMENT]) {
+		} else if (match[RE_COMMENTS.inline_comment]) {
 			// connection.console.log("Found inline comment at " + pos.line);
 			// Find start of inline comment
-			lines[pos.line].comments.push(new Comment(lines[pos.line].line.indexOf("#") + 1));
-		} else if (match[STRING]) {
+			lines[pos.line].addComment(0, lines[pos.line].text.indexOf("#") + 1);
+		} else if (match[RE_COMMENTS.string]) {
 			
+		} else {
+			// Everything else
+		}
+	}
+
+	// Parse structure
+
+	while (match = RE_STRUCTURE.regex.exec(text)!) {
+		let pos = textDocument.positionAt(match.index);
+
+		if (match[RE_STRUCTURE.directive]) {
+			let m: string = match[RE_STRUCTURE.directive]
+			let s = m.split("::");
+			let name: string = s[0];
+			let args: string = s[1];
+
+			if (!args) {
+				continue;
+			}
+
+			pos = Position.create(pos.line, pos.character + m.indexOf("::") + 2 + args.search(/\S|$/));
+			parseDirective(name.trim(), parseArguments(args.trimLeft(), pos));
+
+		} else if(match[RE_STRUCTURE.rulename]) {
+			let name = match[RE_STRUCTURE.rulename];
+			rules.push(new RuleInfo(
+				name, Range.create(pos, textDocument.positionAt(match.index + match[0].length))
+			));
 		}
 	}
 
@@ -240,6 +208,7 @@ async function validate(textDocument: TextDocument): Promise<void> {
 
 const CONSTANT_NAMES : CompletionItem[] = [
 	{label: "@name", kind: CompletionItemKind.Keyword},
+	{label: "@override", kind: CompletionItemKind.Keyword},
 	{label: "@@nameguard", kind: CompletionItemKind.Keyword},
 	{label: "@@namechars", kind: CompletionItemKind.Keyword},
 	{label: "@@grammar", kind: CompletionItemKind.Keyword},
@@ -269,10 +238,10 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 
 		let items: CompletionItem[] = [];
 	
-		while (pos > 0 && /[\w@]/.test(lineinfo.line.charAt(pos - 1))) {
+		while (pos > 0 && /[\w@]/.test(lineinfo.text.charAt(pos - 1))) {
 			pos -= 1;
 		}
-		let word = lineinfo.line.substring(pos, start_pos);
+		let word = lineinfo.text.substring(pos, start_pos);
 		
 		connection.console.log("Autocompletion for: " + word);
 

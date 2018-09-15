@@ -242,7 +242,7 @@
 				},
 				{
 					"name": "constant.numeric.float.tatsu",
-					"match": "[-+]?(?:\\d+\\.\\d*|\\d*\\.\\d+)(?:[Ee][-+]?\\d+)?"
+					"match": "[-+]?(\\d+\\.\\d*|\\d*\\.\\d+)([Ee][-+]?\\d+)?"
 				},
 				{
 					"name": "constant.numeric.integer.tatsu",
