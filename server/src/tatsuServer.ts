@@ -15,6 +15,8 @@ import {
 	DiagnosticSeverity
 } from 'vscode-languageserver';
 
+import { Token, tokenize } from './grammar';
+
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
 let connection = createConnection(ProposedFeatures.all);
@@ -49,35 +51,29 @@ function countLines(str: string) {
 }
 
 function testIn(pos: Position, range: Range): boolean {
-	return pos.line <= range.start.line && pos.line >= range.end.line &&
-		pos.character <= range.start.character && pos.character >= range.end.character;
+	return pos.line >= range.start.line && pos.line <= range.end.line &&
+		pos.character >= range.start.character && pos.character <= range.end.character;
 }
 
 class LineInfo {
 	text: string;
+	tokens: Token[];
 	comments: Range[] = [];
 	line: number;
 
-	constructor(text: string, line: number) {
+	constructor(text: string, tokens: Token[], line: number) {
 		this.text = text;
 		this.line = line;
+		this.tokens = tokens;
 	}
 
-	isCommentAt(character: number): boolean {
-		for (let comment of this.comments) {
-			if (testIn(Position.create(this.line, character), comment)) {
-				return true;
-			}
-		}
-		return false;
-	}
-	
-	charRange(start: number, end: number): Range {
-		return Range.create(this.line, start, this.line, end);
+	getTokenAt(char: number): Token {
+		let pos = Position.create(this.line, char);
+		return this.tokens.filter(t => testIn(pos, t.range))[0];
 	}
 
-	addComment(start: number, end: number) {
-		this.comments.push(this.charRange(start, end));
+	filterByScope(str: string) {
+		return this.tokens.filter(t => t.inScope(str));
 	}
 }
 
@@ -93,109 +89,43 @@ class RuleInfo {
 	}
 }
 
-interface CacheEntry {
-	rules: RuleInfo[];
-	keywords: CompletionItem[];
+class CacheEntry {
+	rules: RuleInfo[] = [];
+	keywords: CompletionItem[] = [];
 	lines: LineInfo[];
+
+	constructor(lines: LineInfo[]) {
+		this.lines = lines;
+	}
+
+	getTokenAt(pos: Position): Token {
+		return this.lines[pos.line].getTokenAt(pos.character);
+	}
+
+	filterByScope(str: string): Token[] {
+		return this.lines.map(v => v.filterByScope(str)).reduce((f, n) => f.concat(n));
+	}
 }
 
 let cachedFiles = new Map<string, CacheEntry>();
 
 async function validate(textDocument: TextDocument): Promise<void> {
 	let text = textDocument.getText();
-	let lines = text.split("\n").map((v, i) => new LineInfo(v, i));
+	let tlines = text.split("\n");
+	let tokens = await tokenize(tlines);
+
+	let lines = tlines.map((v, i) => new LineInfo(v, tokens[i], i));
+	let cacheEntry = new CacheEntry(lines);
 
 	let diagnostics: Diagnostic[] = [];
-	let keywords: CompletionItem[] = [];
-	let rules: RuleInfo[] = [];
 
-	function parseDirective(name: string, args: Argument[]) {
+	function parseDirective(name: string, args: Token[]) {
 		if (name === "@@keyword") {
-			for (let arg of args) {
-				if (arg.type === ArgumentType.RAW_STRING || arg.type === ArgumentType.STRING) {
-					console.log(arg.value)
-					keywords.push({label: arg.value as string, kind: CompletionItemKind.Value});
-				} else {
-					diagnostics.push({
-						message: "Invalid keyword",
-						range: arg.range,
-						severity: DiagnosticSeverity.Warning
-					});
-				}
-			}
-		}
-	}
-		
-	let match: any;
-
-	// Compute comment positions
-	while (match = RE_COMMENTS.regex.exec(text)!) {
-		let pos = textDocument.positionAt(match.index);
-
-		if (match[RE_COMMENTS.multiline_comment]) {
-			let nl = countLines(match[0]);
-			// connection.console.log("Found multiline comment at " + pos.line + " length " + (nl + 1));
-			
-			if (nl === 0) {
-				lines[pos.line].addComment(pos.character + 1, pos.character + match[0].length - 1);
-			} else {
-				// First line
-				lines[pos.line].addComment(lines[pos.line].text.lastIndexOf("(*") + 1, lines[pos.line].text.length);
-				// Last line
-				lines[pos.line + nl].addComment(0, lines[pos.line].text.indexOf("*)") + 1);
-			}
-			if (nl > 2) {
-				let l = nl - 1;
-				while (l--) {
-					let lp = pos.line + l + 1;
-					// mark all lines
-					lines[lp].addComment(0, lines[lp].text.length);
-				}
-			}
-
-			
-		} else if (match[RE_COMMENTS.inline_comment]) {
-			// connection.console.log("Found inline comment at " + pos.line);
-			// Find start of inline comment
-			lines[pos.line].addComment(0, lines[pos.line].text.indexOf("#") + 1);
-		} else if (match[RE_COMMENTS.string]) {
-			
-		} else {
-			// Everything else
+			// TODO
 		}
 	}
 
-	// Parse structure
-
-	while (match = RE_STRUCTURE.regex.exec(text)!) {
-		let pos = textDocument.positionAt(match.index);
-
-		if (match[RE_STRUCTURE.directive]) {
-			let m: string = match[RE_STRUCTURE.directive]
-			let s = m.split("::");
-			let name: string = s[0];
-			let args: string = s[1];
-
-			if (!args) {
-				continue;
-			}
-
-			pos = Position.create(pos.line, pos.character + m.indexOf("::") + 2 + args.search(/\S|$/));
-			parseDirective(name.trim(), parseArguments(args.trimLeft(), pos));
-
-		} else if(match[RE_STRUCTURE.rulename]) {
-			let name = match[RE_STRUCTURE.rulename];
-			rules.push(new RuleInfo(
-				name, Range.create(pos, textDocument.positionAt(match.index + match[0].length))
-			));
-		}
-	}
-
-	let cacheEntry: CacheEntry = {
-		keywords: keywords,
-		rules: rules,
-		lines: lines
-	};
+	cacheEntry.rules = cacheEntry.filterByScope("entity.name.function").map(v => new RuleInfo(v.text, Range.create(0, 0, 0, 0)));
 
 	cachedFiles.set(textDocument.uri, cacheEntry);
 
@@ -228,9 +158,10 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 		let lineinfo = cachedFile.lines[position.position.line];
 		let start_pos = position.position.character;
 		let pos = start_pos;
+		let token = lineinfo.getTokenAt(start_pos);
 		
 		// Check if we are inside a comment
-		if (lineinfo.isCommentAt(start_pos)) { 
+		if (token.inScope("comment")) {
 			return [];
 		}
 
@@ -240,17 +171,18 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 			pos -= 1;
 		}
 		let word = lineinfo.text.substring(pos, start_pos);
-		
-		connection.console.log("Autocompletion for: " + word);
 
-		if (word.startsWith("@")) {
-			items = items.concat(CONSTANT_NAMES);
+
+		// Check if we are inside a rule body
+		if (token.inScope("rule-body")){
+			items = items.concat(cachedFile.rules.map(r => r.item));
 		} else {
-			for (let rule of cachedFile.rules) {
-				items.push(rule.item);
+			if (word.startsWith("@")) {
+				items = items.concat(CONSTANT_NAMES);
 			}
 		}
-		
+	
+
 		return items;
 	}
 );

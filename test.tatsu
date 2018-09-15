@@ -1,5 +1,5 @@
 @@keyword :: something else duh
 
-(**)
+start = something /mocha/ $;
 
-start = something $;
+end = something;
