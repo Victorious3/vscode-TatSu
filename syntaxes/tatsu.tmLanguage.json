@@ -18,7 +18,8 @@
 			"end": "\\n",
 			"patterns": [
 				{ "include": "#literal" },
-				{ "include": "#unquoted" }
+				{ "include": "#unquoted" },
+				{ "include": "#comment" }
 			]
 		},
 		{
@@ -59,27 +60,20 @@
 			"patterns": [
 				{
 					"name": "meta.tatsu.based-rule",
-					"patterns": [
-						{
-							"match": "(<)\\s*(\\w+)",
-							"captures": {
-								"1": { "name": "punctuation.separator.base.tatsu" },
-								"2": { "name": "variable.function.tatsu" }
-							}
-						}
-					]
+					"match": "(<)\\s*(\\w+)",
+					"captures": {
+						"1": { "name": "punctuation.separator.base.tatsu" },
+						"2": { "name": "variable.function.tatsu" }
+					}
 				},
 				{
 					"name": "meta.tatsu.type-argument",
-					"patterns": [
-						{
-							"match": "(::)\\s*(\\w+)",
-							"captures": {
-								"1": { "name": "punctuation.separator.type.tatsu" },
-								"2": { "name": "entity.name.type.tatsu" }
-							}
-						}
-					]
+					"match": "(::)\\s*(\\w+)?",
+					"captures": {
+						"1": { "name": "punctuation.separator.type.tatsu" },
+						"2": { "name": "entity.name.type.tatsu" }
+					}
+				
 				},
 				{
 					"name": "meta.tatsu.rule-arguments",
@@ -94,7 +88,8 @@
 							"end": "(?=[,\\)])",
 							"patterns": [
 								{ "include": "#literal" },
-								{ "include": "#unquoted" }
+								{ "include": "#unquoted" },
+								{ "include": "#comment" }
 							]
 						},
 						{ "include": "#literal" },
@@ -138,8 +133,8 @@
 							"match": "(?!\\d)(\\w+)"
 						}
 					]
-				}
-				
+				},
+				{ "include": "#comment" }
 			]
 		}
 	],

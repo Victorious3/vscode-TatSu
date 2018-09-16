@@ -1,12 +1,12 @@
 // Utility
 export function removeAll<T>(arr: Array<T>, test: (t: T) => boolean): Array<T> {
-	let i = arr.length;
 	let match: Array<T> = [];
-	while (i--) {
+	for (let i = 0; i < arr.length; i++) {
 		let t = arr[i];
 		if (test(t)) {
 			match.push(t);
-			arr.splice(i, 1);
+            arr.splice(i, 1);
+            i--;
 		}
 	}
 	return match;

@@ -85,9 +85,9 @@ class RuleInfo {
 }
 
 class CacheEntry {
-	rules: RuleInfo[] = [];
-	keywords: CompletionItem[] = [];
-	types: CompletionItem[] = [];
+	rules: Map<string, RuleInfo> = new Map();
+	keywords: Set<string> = new Set();
+	types: Map<string, CompletionItem> = new Map();
 
 	lines: LineInfo[];
 
@@ -99,8 +99,8 @@ class CacheEntry {
 		return this.lines[pos.line].getTokenAt(pos.character);
 	}
 
-	filterByScope(str: string): Token[] {
-		return this.lines.map(v => v.filterByScope(str)).reduce((f, n) => f.concat(n));
+	all(): Token[] {
+		return this.lines.map(v => v.tokens).reduce((f, n) => f.concat(n), []);
 	}
 }
 
@@ -109,18 +109,20 @@ let cachedFiles = new Map<string, CacheEntry>();
 async function validate(textDocument: TextDocument): Promise<void> {
 	let text = textDocument.getText();
 	let tlines = text.split("\n");
-	let tokens = await tokenize(tlines);
+	let tok = await tokenize(tlines);
 
-	let lines = tlines.map((v, i) => new LineInfo(v, tokens[i], i));
+	let lines = tlines.map((v, i) => new LineInfo(v, tok[i], i));
 	let cacheEntry = new CacheEntry(lines);
 
 	let diagnostics: Diagnostic[] = [];
+	let tokens = cacheEntry.all();
 
 	function parseDirective(name: string, args: Value[]) {
 		if (name === "@@keyword") {
-			let keywords = removeAll(args, v => v.type === ValueType.RAW_STRING)
-				.map(v => <CompletionItem> {label: v.value, kind: CompletionItemKind.Constant});
-			cacheEntry.keywords.concat(keywords);
+			let keywords = removeAll(args, v => v.type === ValueType.RAW_STRING || v.type === ValueType.STRING)
+				.map(v => v.value);
+			
+			keywords.forEach(k => cacheEntry.keywords.add(k));
 
 			for (let invalid of args) {
 				diagnostics.push({
@@ -132,15 +134,14 @@ async function validate(textDocument: TextDocument): Promise<void> {
 		}
 	}
 
-	let directives = cacheEntry.filterByScope("meta.tatsu.directive");
+	let directives = removeAll(tokens, t => t.inScope("meta.tatsu.directive"));
 	let name: Token;
 	while (name = takeNext(directives, t => t.inScope("keyword.control"))) {
 		takeNext(directives, t => t.inScope("separator.directive"));
 		let args = takeValues(directives, diagnostics);
 		parseDirective(name.text, args);
 
-		let rest = takeWhile(directives, t => !t.inScope("keyword.control"))
-			.filter(t => !t.isWhitespace());
+		let rest = takeWhile(directives, t => !t.inScope("keyword.control"));
 
 		if (rest.length > 0) {
 			diagnostics.push({
@@ -152,9 +153,15 @@ async function validate(textDocument: TextDocument): Promise<void> {
 		
 	}
 
-	cacheEntry.rules = cacheEntry
-		.filterByScope("entity.name.function")
-		.map(v => new RuleInfo(v.text));
+	removeAll(tokens, t => t.inScope("entity.name.function"))
+		.map(v => new RuleInfo(v.text))
+		.forEach(k => cacheEntry.rules.set(k.name, k));
+
+	removeAll(tokens, t => t.inScope("entity.name.type"))
+		.map(v => <CompletionItem> {
+			kind: CompletionItemKind.Class,
+			label: v.text
+		}).forEach(k => cacheEntry.types.set(k.label, k));
 
 	cachedFiles.set(textDocument.uri, cacheEntry);
 
@@ -198,28 +205,42 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 		while (pos > 0 && /[\w@]/.test(lineinfo.text.charAt(pos - 1))) {
 			pos -= 1;
 		}
-		let word = lineinfo.text.substring(pos, start_pos);
+		// let word = lineinfo.text.substring(pos, start_pos);
 
 		function suggestKeywords() {
-			items = items.concat(cachedFile!.keywords);
+			items = items.concat(Array.from(cachedFile!.keywords)
+				.map(k => <CompletionItem> {
+					label: k,
+					kind: CompletionItemKind.Enum
+				})
+			);
+		}
+
+		function suggestKeywordStrings() {
+			items = items.concat(Array.from(cachedFile!.keywords)
+				.map(k => <CompletionItem> {
+					label: "\"" + k + "\"",
+					kind: CompletionItemKind.Enum
+				})
+			);
 		}
 
 		if (token.inScope("constant") && !token.inScope("constant.other.end")) {
 			if (token.inScope("constant.other")) {
 				suggestKeywords();
 			}
-		} else if (token.inScope("string") && !token.inScope("string.end")) {
+		} else if (token.inScope("string") && !token.inScope("end")) {
 			// literal
 			suggestKeywords();
 		} else if (token.inScope("rule-body")){
-			items = items.concat(cachedFile.rules.map(r => r.item));
-		} else {
-			if (word.startsWith("@")) {
-				items = items.concat(CONSTANT_NAMES);
-			}
+			suggestKeywordStrings();
+			items = items.concat(Array.from(cachedFile.rules.values()).map(r => r.item));
+		} else if (token.inScope("meta.tatsu.type-argument")) {
+			items = items.concat(Array.from(cachedFile.types.values()));
+		} else if (!token.inScope("meta.tatsu.rule-definition")){
+			items = items.concat(CONSTANT_NAMES);
 		}
-	
-
+			
 		return items;
 	}
 );
