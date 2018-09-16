@@ -1,5 +1,3 @@
-@@keyword :: something else duh
-
-start = something /mocha/ $;
-
-end = something;
+@@keyword :: what "what\d
+\e"
+@@keyword :: this is that

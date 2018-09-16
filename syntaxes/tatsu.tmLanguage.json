@@ -4,7 +4,7 @@
 	"patterns": [
 		{
 			"name": "meta.tatsu.directive",
-			"begin": "(@@(?!\\d)\\w+)\\s*(::)\\s*(?=[^\\s])",
+			"begin": "(@@(?!\\d)\\w+)\\s*(::)",
 			"beginCaptures": {
 				"1": {
 					"name": "keyword.control.tatsu",
@@ -29,6 +29,7 @@
 			}
 		},
 		{
+			"name": "meta.tatsu.include",
 			"begin": "(#include)\\s*(::)",
 			"beginCaptures": {
 				"1": {"name": "keyword.control.import.tatsu"},

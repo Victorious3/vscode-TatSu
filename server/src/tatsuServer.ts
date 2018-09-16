@@ -15,11 +15,12 @@ import {
 	DiagnosticSeverity
 } from 'vscode-languageserver';
 
-import { Token, tokenize } from './grammar';
+import { Token, tokenize, takeValues, Value, ValueType, rangeOver } from './grammar';
+import { removeAll, takeNext, takeWhile } from './functions';
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
-let connection = createConnection(ProposedFeatures.all);
+export let connection = createConnection(ProposedFeatures.all);
 
 // Create a simple text document manager. The text document manager
 // supports full document sync only
@@ -45,10 +46,6 @@ connection.onInitialize((params: InitializeParams) => {
 documents.onDidChangeContent(change => {
 	validate(change.document);
 });
-
-function countLines(str: string) {
-	return str.split("\n").length - 1;
-}
 
 function testIn(pos: Position, range: Range): boolean {
 	return pos.line >= range.start.line && pos.line <= range.end.line &&
@@ -80,11 +77,9 @@ class LineInfo {
 class RuleInfo {
 	name: string;
 	item: CompletionItem;
-	range: Range;
 
-	constructor(name: string, range: Range) {
+	constructor(name: string) {
 		this.name = name;
-		this.range = range;
 		this.item = {label: name, kind: CompletionItemKind.Function};
 	}
 }
@@ -92,6 +87,8 @@ class RuleInfo {
 class CacheEntry {
 	rules: RuleInfo[] = [];
 	keywords: CompletionItem[] = [];
+	types: CompletionItem[] = [];
+
 	lines: LineInfo[];
 
 	constructor(lines: LineInfo[]) {
@@ -119,19 +116,50 @@ async function validate(textDocument: TextDocument): Promise<void> {
 
 	let diagnostics: Diagnostic[] = [];
 
-	function parseDirective(name: string, args: Token[]) {
+	function parseDirective(name: string, args: Value[]) {
 		if (name === "@@keyword") {
-			// TODO
+			let keywords = removeAll(args, v => v.type === ValueType.RAW_STRING)
+				.map(v => <CompletionItem> {label: v.value, kind: CompletionItemKind.Constant});
+			cacheEntry.keywords.concat(keywords);
+
+			for (let invalid of args) {
+				diagnostics.push({
+					message: "Invalid keyword",
+					severity: DiagnosticSeverity.Warning,
+					range: invalid.range
+				});
+			}
 		}
 	}
 
-	cacheEntry.rules = cacheEntry.filterByScope("entity.name.function").map(v => new RuleInfo(v.text, Range.create(0, 0, 0, 0)));
+	let directives = cacheEntry.filterByScope("meta.tatsu.directive");
+	let name: Token;
+	while (name = takeNext(directives, t => t.inScope("keyword.control"))) {
+		takeNext(directives, t => t.inScope("separator.directive"));
+		let args = takeValues(directives, diagnostics);
+		parseDirective(name.text, args);
+
+		let rest = takeWhile(directives, t => !t.inScope("keyword.control"))
+			.filter(t => !t.isWhitespace());
+
+		if (rest.length > 0) {
+			diagnostics.push({
+				message: "Syntax error",
+				severity: DiagnosticSeverity.Error,
+				range: rangeOver(rest)
+			});
+		}
+		
+	}
+
+	cacheEntry.rules = cacheEntry
+		.filterByScope("entity.name.function")
+		.map(v => new RuleInfo(v.text));
 
 	cachedFiles.set(textDocument.uri, cacheEntry);
 
 	connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
 }
-
 // connection.onDidChangeWatchedFiles(_change => {});
 
 const CONSTANT_NAMES : CompletionItem[] = [
@@ -172,9 +200,18 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 		}
 		let word = lineinfo.text.substring(pos, start_pos);
 
+		function suggestKeywords() {
+			items = items.concat(cachedFile!.keywords);
+		}
 
-		// Check if we are inside a rule body
-		if (token.inScope("rule-body")){
+		if (token.inScope("constant") && !token.inScope("constant.other.end")) {
+			if (token.inScope("constant.other")) {
+				suggestKeywords();
+			}
+		} else if (token.inScope("string") && !token.inScope("string.end")) {
+			// literal
+			suggestKeywords();
+		} else if (token.inScope("rule-body")){
 			items = items.concat(cachedFile.rules.map(r => r.item));
 		} else {
 			if (word.startsWith("@")) {
