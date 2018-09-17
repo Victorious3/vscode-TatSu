@@ -1,19 +1,53 @@
-import fs = require("fs");
-import { Range, Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
-import { parseRawGrammar, Registry, StackElement, IToken, IGrammar } from "vscode-textmate";
-import { removeAll, takeWhile, last } from "./functions";
-import { documents } from "./tatsuServer";
+import * as fs from 'fs';
+import { Range, Diagnostic, DiagnosticSeverity } from 'vscode-languageserver';
+import { removeAll, takeWhile, last } from './functions';
+import { documents, vscode_root} from './tatsuServer';
+
+function sleep(ms: any) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Returns a node module installed with VSCode
+ */
+async function getCoreNodeModule(moduleName: string) {
+    let tries = 0;
+    while (!vscode_root && tries++ < 5) {
+        await sleep(200);
+    }
+    if (!vscode_root) {
+        throw new Error("vscode path not set, aborting!");
+    }
+
+    let addPath = require("app-module-path").addPath;
+    addPath(`${vscode_root}/node_modules.asar/`);
+    addPath(`${vscode_root}/node_modules/`);
+   
+    return require(moduleName);
+}
 
 const grammarPath = __dirname+"/../../syntaxes/tatsu.tmLanguage.json";
 
-let registry = new Registry();
+let grammar: any;
+async function getGrammar() {
+    if (grammar) {
+        return grammar;
+    }
+
+    let tm = await getCoreNodeModule('vscode-textmate');
+    let registry = new tm.Registry();
+    let g = fs.readFileSync(grammarPath).toString();
+    grammar = await registry.addGrammar(tm.parseRawGrammar(g, grammarPath));
+    return grammar;
+}
+
 
 export class Token {
     scopes: string[];
     range: Range;
     uri: string;
 
-    static createFromIToken(token: IToken, line: number, uri: string) {
+    static create(token: any, line: number, uri: string) {
         return new Token(token.scopes,
             Range.create(line, token.startIndex, line, token.endIndex), uri);
     }
@@ -69,25 +103,15 @@ export async function tokenize(uri: string): Promise<Token[][]> {
     let grammar = await getGrammar();
     let document = documents.get(uri)!; // TODO
 
-    var ruleStack: StackElement;
+    var ruleStack: any;
     var tokens: Token[][] = [];
     for (let i = 0; i < document.lineCount; i++) {
         let line = document.getText(Range.create(i, 0, i + 1, 0));
         var r = grammar.tokenizeLine(line, ruleStack!);
-	    tokens.push(r.tokens.map(v => Token.createFromIToken(v, i, uri)));
+	    tokens.push(r.tokens.map((v: any) => Token.create(v, i, uri)));
 	    ruleStack = r.ruleStack;
     }
     return tokens;
-}
-
-let grammar: IGrammar | undefined;
-async function getGrammar() {
-    if (grammar) {
-        return grammar;
-    }
-    let g = fs.readFileSync(grammarPath).toString();
-    grammar = await registry.addGrammar(parseRawGrammar(g, grammarPath));
-    return grammar;
 }
 
 export function rangeOver(tokens: Token[]): Range {

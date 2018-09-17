@@ -1,7 +1,6 @@
 {
     "name": "tatsu-client",
     "version": "0.0.1",
-    "publisher": "neogeny",
     "engines": {
         "vscode": "^1.27.0"
     },

@@ -17,8 +17,8 @@ import {
 
 import { Token, tokenize, takeValue, takeValues, Value, ValueType, takeUnexpected, error } from './grammar';
 import { removeAll, takeNext } from './functions';
-import { URL } from 'url';
-import path = require('path');
+import Uri from 'vscode-uri';
+import * as path from 'path';
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -27,6 +27,11 @@ export let connection = createConnection(ProposedFeatures.all);
 // Create a simple text document manager. The text document manager
 // supports full document sync only
 export let documents: TextDocuments = new TextDocuments();
+
+// vscode root directory as transfered by the client
+// this is used to load textmate
+export let vscode_root: string;
+connection.onRequest("vscode-dir", (dir: string) => vscode_root = dir);
 
 connection.onInitialize((params: InitializeParams) => {
 	return {
@@ -170,15 +175,12 @@ async function validate(uri: string): Promise<void> {
 	function parseInclude(file: Value) {
 		let p = file.value;
 		if (!path.isAbsolute(p)) {
-			p = path.basename(p);
-			let dir = path.dirname(uri);
-			p = dir + "/" + p;
+			p = Uri.file(path.dirname(Uri.parse(uri).fsPath) + "/" + p).toString();
 		} else {
-			p = "file://" + p;
+			p = Uri.file(file.value).toString();
 		}
-		p = new URL(p).href;
-		// console.log(p);
-		// console.log(uri);
+		console.log(p);
+		console.log(uri);
 		console.log(documents.keys());
 	}
 

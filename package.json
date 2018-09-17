@@ -3,7 +3,7 @@
     "displayName": "TatSu",
     "description": "Syntax highlighting for TatSu grammar files",
     "version": "0.0.1",
-    "publisher": "neogeny",
+    "publisher": "vicnightfall",
     "engines": {
         "vscode": "^1.22.0"
     },

@@ -12,7 +12,7 @@ import {
 
 let client: LanguageClient;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.languages.setLanguageConfiguration('tatsu', {
@@ -54,6 +54,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Start the client. This will also launch the server
 	client.start();
+
+	// Send vscode directory
+	await client.onReady();
+	client.sendRequest("vscode-dir", vscode.env.appRoot);
 }
 
 export async function deactivate(): Promise<void> {
