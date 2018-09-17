@@ -16,7 +16,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.languages.setLanguageConfiguration('tatsu', {
-			wordPattern: /(@@?\w*)|(\w+)/
+			wordPattern: /(@@?\w*)|(\w+)/,
 		})
 	);
 
