@@ -1,7 +1,8 @@
 import fs = require("fs");
 import { Range, Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
-import { parseRawGrammar, Registry, StackElement, IToken } from "vscode-textmate";
+import { parseRawGrammar, Registry, StackElement, IToken, IGrammar } from "vscode-textmate";
 import { takeWhile, last } from "./functions";
+import { documents } from "./tatsuServer";
 
 const grammarPath = __dirname+"/../../syntaxes/tatsu.tmLanguage.json";
 
@@ -9,19 +10,18 @@ let registry = new Registry();
 
 export class Token {
     scopes: string[];
-    text: string;
     range: Range;
+    uri: string;
 
-    static createFromIToken(token: IToken, text: string, line: number) {
-        return new Token(token.scopes, 
-            Range.create(line, token.startIndex, line, token.endIndex), 
-            text.substring(token.startIndex, token.endIndex));
+    static createFromIToken(token: IToken, line: number, uri: string) {
+        return new Token(token.scopes,
+            Range.create(line, token.startIndex, line, token.endIndex), uri);
     }
 
-    constructor(scopes: string[], range: Range, text: string) {
+    constructor(scopes: string[], range: Range, uri: string) {
         this.scopes = scopes;
+        this.uri = uri;
         this.range = range;
-        this.text = text;       
     }
 
     inScope(str: string): boolean {
@@ -33,8 +33,13 @@ export class Token {
         return false;
     }
 
+    text(): string {
+        return documents.get(this.uri)!.getText(this.range);
+    }
+
     isWhitespace(): boolean {
-        return this.text.match("\\s*")![0].length === this.text.length;
+        let text = this.text();
+        return text.match("\\s*")![0].length === text.length;
     }
 
     isLiteral(): boolean {
@@ -60,23 +65,29 @@ export class Value {
     }
 }
 
-export async function tokenize(lines: string[]): Promise<Token[][]> {
+export async function tokenize(uri: string): Promise<Token[][]> {
     let grammar = await getGrammar();
+    let document = documents.get(uri)!; // TODO
 
     var ruleStack: StackElement;
     var tokens: Token[][] = [];
-    for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
+    for (let i = 0; i < document.lineCount; i++) {
+        let line = document.getText(Range.create(i, 0, i + 1, 0));
         var r = grammar.tokenizeLine(line, ruleStack!);
-	    tokens.push(r.tokens.map(v => Token.createFromIToken(v, line, i)));
+	    tokens.push(r.tokens.map(v => Token.createFromIToken(v, i, uri)));
 	    ruleStack = r.ruleStack;
     }
     return tokens;
 }
 
+let grammar: IGrammar | undefined;
 async function getGrammar() {
-    let grammar = fs.readFileSync(grammarPath).toString()
-    return registry.addGrammar(parseRawGrammar(grammar, grammarPath))
+    if (grammar) {
+        return grammar;
+    }
+    let g = fs.readFileSync(grammarPath).toString();
+    grammar = await registry.addGrammar(parseRawGrammar(g, grammarPath));
+    return grammar;
 }
 
 export function rangeOver(tokens: Token[]): Range {
@@ -99,7 +110,7 @@ export function takeValue(tokens: Token[], diagnostics: Diagnostic[]): Value | n
     let value: Value;
 
     if (first.inScope("string.unquoted")) {
-        value = new Value(ValueType.RAW_STRING, first.text, first.range);
+        value = new Value(ValueType.RAW_STRING, first.text(), first.range);
     } else if (first.inScope("constant.other")) {
         value = takeValue(tokens, diagnostics)!;
         value.type = ValueType.CONSTANT;
@@ -118,7 +129,7 @@ export function takeValue(tokens: Token[], diagnostics: Diagnostic[]): Value | n
                 content.length > 0 ? last(content).range.end : 
                 first.range.end));
     } else {
-        value = new Value(ValueType.NUMBER, first.text, first.range);
+        value = new Value(ValueType.NUMBER, first.text(), first.range);
     }
 
     if (value.range.end.line > value.range.start.line) {

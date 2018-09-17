@@ -3,7 +3,6 @@
 import {
 	createConnection,
 	TextDocuments,
-	TextDocument,
 	Diagnostic,
 	ProposedFeatures,
 	InitializeParams,
@@ -25,7 +24,7 @@ export let connection = createConnection(ProposedFeatures.all);
 
 // Create a simple text document manager. The text document manager
 // supports full document sync only
-let documents: TextDocuments = new TextDocuments();
+export let documents: TextDocuments = new TextDocuments();
 
 connection.onInitialize((params: InitializeParams) => {
 	return {
@@ -45,7 +44,7 @@ connection.onInitialize((params: InitializeParams) => {
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
-	validate(change.document.getText(), change.document.uri);
+	validate(change.document.uri);
 });
 
 function testIn(pos: Position, range: Range): boolean {
@@ -54,13 +53,11 @@ function testIn(pos: Position, range: Range): boolean {
 }
 
 class LineInfo {
-	text: string;
 	tokens: Token[];
 	comments: Range[] = [];
 	line: number;
 
-	constructor(text: string, tokens: Token[], line: number) {
-		this.text = text;
+	constructor(tokens: Token[], line: number) {
 		this.line = line;
 		this.tokens = tokens;
 	}
@@ -131,11 +128,10 @@ class CacheEntry {
 
 let cachedFiles = new Map<string, CacheEntry>();
 
-async function validate(text: string, uri: string): Promise<void> {
-	let tlines = text.split("\n");
-	let tok = await tokenize(tlines);
+async function validate(uri: string): Promise<void> {
+	let tok = await tokenize(uri);
 
-	let lines = tlines.map((v, i) => new LineInfo(v, tok[i], i));
+	let lines = tok.map((v, i) => new LineInfo(v, i));
 	let cacheEntry = new CacheEntry(lines);
 
 	let diagnostics: Diagnostic[] = [];
@@ -163,7 +159,7 @@ async function validate(text: string, uri: string): Promise<void> {
 	while (name = takeNext(directives, t => t.inScope("keyword.control"))) {
 		takeNext(directives, t => t.inScope("separator.directive"));
 		let args = takeValues(directives, diagnostics);
-		parseDirective(name.text, args);
+		parseDirective(name.text(), args);
 
 		let rest = takeWhile(directives, t => !t.inScope("keyword.control"));
 
@@ -178,11 +174,11 @@ async function validate(text: string, uri: string): Promise<void> {
 	}
 
 	removeAll(tokens, t => t.inScope("entity.name.function"))
-		.map(v => new RuleInfo(v.text))
+		.map(v => new RuleInfo(v.text()))
 		.forEach(k => cacheEntry.rules.set(k.name, k));
 
 	removeAll(tokens, t => t.inScope("entity.name.type"))
-		.map(v => ItemKind.type(v.text))
+		.map(v => ItemKind.type(v.text()))
 		.forEach(k => cacheEntry.types.set(k.label, k));
 
 	cachedFiles.set(uri, cacheEntry);
@@ -324,7 +320,6 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 
 	let lineinfo = cachedFile.lines[position.position.line];
 	let start_pos = position.position.character;
-	let pos = start_pos;
 	let token = lineinfo.getTokenAt(start_pos);
 	
 	// Check if we are inside a comment
@@ -333,11 +328,6 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 	}
 
 	let items: CompletionItem[] = [];
-
-	while (pos > 0 && /[\w@]/.test(lineinfo.text.charAt(pos - 1))) {
-		pos -= 1;
-	}
-	// let word = lineinfo.text.substring(pos, start_pos);
 
 	function suggestKeywords() {
 		items = items.concat(Array.from(cachedFile!.keywords)
