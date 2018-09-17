@@ -1,7 +1,7 @@
 import fs = require("fs");
 import { Range, Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
 import { parseRawGrammar, Registry, StackElement, IToken, IGrammar } from "vscode-textmate";
-import { takeWhile, last } from "./functions";
+import { removeAll, takeWhile, last } from "./functions";
 import { documents } from "./tatsuServer";
 
 const grammarPath = __dirname+"/../../syntaxes/tatsu.tmLanguage.json";
@@ -120,7 +120,7 @@ export function takeValue(tokens: Token[], diagnostics: Diagnostic[]): Value | n
         }
     } else if (first.inScope("string")) {
         let content = takeWhile(tokens, v => !v.inScope("end"));
-        let text = content.map(v => v.text).reduce((first, next) => first + next, "");
+        let text = content.map(v => v.text()).reduce((first, next) => first + next, "");
         let next = tokens.splice(0, 1)[0];
         value = new Value(
             ValueType.STRING, text, 
@@ -142,4 +142,28 @@ export function takeValue(tokens: Token[], diagnostics: Diagnostic[]): Value | n
     }
 
     return value;
+}
+
+export function error(message: string, range: Range): Diagnostic {
+    return {
+        message: message,
+        severity: DiagnosticSeverity.Error,
+        range: range
+    };
+}
+export function warning(message: string, range: Range): Diagnostic {
+    return {
+        message: message,
+        severity: DiagnosticSeverity.Warning,
+        range: range
+    };
+}
+
+export function takeUnexpected(tokens: Token[], diagnostics: Diagnostic[], test: (t: Token) => boolean) {
+    let rest = takeWhile(tokens, test);
+    removeAll(rest, t => t.isWhitespace());
+
+    if (rest.length > 0) {
+        diagnostics.push(error("Syntax error: Unexpected Token", rangeOver(rest)));
+    }
 }

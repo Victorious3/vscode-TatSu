@@ -15,8 +15,10 @@ import {
 	MarkupContent
 } from 'vscode-languageserver';
 
-import { Token, tokenize, takeValues, Value, ValueType, rangeOver } from './grammar';
-import { removeAll, takeNext, takeWhile } from './functions';
+import { Token, tokenize, takeValue, takeValues, Value, ValueType, takeUnexpected, error } from './grammar';
+import { removeAll, takeNext } from './functions';
+import { URL } from 'url';
+import path = require('path');
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -94,23 +96,12 @@ class RuleInfo {
 	}
 }
 
-class IncludeInfo {
-	uri: string;
-	line: number;
-
-	constructor(uri: string, line: number) {
-		this.uri = uri;
-		this.line = line;
-	}
-}
-
 class CacheEntry {
 	rules: Map<string, RuleInfo> = new Map();
 	keywords: Set<string> = new Set();
 	types: Map<string, CompletionItem> = new Map();
 
-	includes: IncludeInfo[] = [];
-
+	includes: string[] = [];
 	lines: LineInfo[];
 
 	constructor(lines: LineInfo[]) {
@@ -157,20 +148,15 @@ async function validate(uri: string): Promise<void> {
 	let directives = removeAll(tokens, t => t.inScope("meta.tatsu.directive"));
 	let name: Token;
 	while (name = takeNext(directives, t => t.inScope("keyword.control"))) {
-		takeNext(directives, t => t.inScope("separator.directive"));
+		let separator = takeNext(directives, t => t.inScope("separator.directive"));
 		let args = takeValues(directives, diagnostics);
-		parseDirective(name.text(), args);
-
-		let rest = takeWhile(directives, t => !t.inScope("keyword.control"));
-
-		if (rest.length > 0) {
-			diagnostics.push({
-				message: "Syntax error",
-				severity: DiagnosticSeverity.Error,
-				range: rangeOver(rest)
-			});
+		if (args.length === 0) {
+			let start = separator.range.start;
+			diagnostics.push(error("Argument expected", 
+				Range.create(start.line, start.character + 2, start.line + 1, 0)));
 		}
-		
+		parseDirective(name.text(), args);
+		takeUnexpected(directives, diagnostics, t => !t.inScope("keyword.control"));
 	}
 
 	removeAll(tokens, t => t.inScope("entity.name.function"))
@@ -180,6 +166,36 @@ async function validate(uri: string): Promise<void> {
 	removeAll(tokens, t => t.inScope("entity.name.type"))
 		.map(v => ItemKind.type(v.text()))
 		.forEach(k => cacheEntry.types.set(k.label, k));
+
+	function parseInclude(file: Value) {
+		let p = file.value;
+		if (!path.isAbsolute(p)) {
+			p = path.basename(p);
+			let dir = path.dirname(uri);
+			p = dir + "/" + p;
+		} else {
+			p = "file://" + p;
+		}
+		p = new URL(p).href;
+		// console.log(p);
+		// console.log(uri);
+		console.log(documents.keys());
+	}
+
+	let includes = removeAll(tokens, t => t.inScope("meta.tatsu.include"));
+	let include: Token;
+	while (include = takeNext(includes, t => t.inScope("keyword.control"))) {
+		let separator = takeNext(includes, t => t.inScope("separator.directive"));
+		let file = takeValue(includes, diagnostics);
+		if (!file) {
+			let start = separator.range.start;
+			diagnostics.push(error("File path expected", 
+				Range.create(start.line, start.character + 2, start.line + 1, 0)));
+			continue;
+		}
+		parseInclude(file!);
+		takeUnexpected(includes, diagnostics, t => !t.inScope("keyword.control"));
+	}
 
 	cachedFiles.set(uri, cacheEntry);
 
@@ -369,12 +385,11 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 // This handler resolve additional information for the item selected in
 // the completion list.
 connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
-		if (item.label.startsWith("@@") || item.label === "#include") {
-			item.insertText = item.label + " :: ";
-		}
-		return item;
+	if (item.label.startsWith("@@") || item.label === "#include") {
+		item.insertText = item.label + " :: ";
 	}
-);
+	return item;
+});
 
 /*
 connection.onDidOpenTextDocument((params) => {

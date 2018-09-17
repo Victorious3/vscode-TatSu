@@ -1,3 +1,4 @@
 @@keyword :: Some What
 
+#include :: "test2.tatsu"
 foo::Type = "What";
