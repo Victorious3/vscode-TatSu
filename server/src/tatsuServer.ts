@@ -9,20 +9,20 @@ import {
 	CompletionItem,
 	CompletionItemKind,
 	TextDocumentPositionParams,
-	Position,
 	Range,
 	DiagnosticSeverity,
-	MarkupContent
+	MarkupContent,
+	TextDocument
 } from 'vscode-languageserver';
 
-import { Token, tokenize, takeValue, takeValues, Value, ValueType, takeUnexpected, error } from './grammar';
-import { removeAll, takeNext } from './functions';
-import Uri from 'vscode-uri';
-import * as path from 'path';
+import { Token, tokenize, takeValues, Value, ValueType, takeUnexpected, error } from './grammar';
+import { removeAll, takeNext, ItemKind } from './functions';
+import { LineInfo, CacheEntry, RuleInfo, cache, getCached, ExternalCacheEntry, getCachedExternal } from './cache';
+import { parseRules, parseIncludes } from './parse';
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
-export let connection = createConnection(ProposedFeatures.all);
+let connection = createConnection(ProposedFeatures.all);
 
 // Create a simple text document manager. The text document manager
 // supports full document sync only
@@ -45,90 +45,24 @@ connection.onInitialize((params: InitializeParams) => {
 	};
 });
 
+function diagnose(uri: string, diag: Diagnostic) {
+	connection.sendDiagnostics({uri: uri, diagnostics: [diag]});
+}
+
 // connection.onInitialized(() => {});
 // connection.onDidChangeConfiguration(change => {});
 
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
-	validate(change.document.uri);
+	validate(change.document);
 });
 
-function testIn(pos: Position, range: Range): boolean {
-	return pos.line >= range.start.line && pos.line <= range.end.line &&
-		pos.character >= range.start.character && pos.character <= range.end.character;
-}
-
-class LineInfo {
-	tokens: Token[];
-	comments: Range[] = [];
-	line: number;
-
-	constructor(tokens: Token[], line: number) {
-		this.line = line;
-		this.tokens = tokens;
-	}
-
-	getTokenAt(char: number): Token {
-		let pos = Position.create(this.line, char);
-		return this.tokens.filter(t => testIn(pos, t.range))[0];
-	}
-
-	filterByScope(str: string) {
-		return this.tokens.filter(t => t.inScope(str));
-	}
-}
-
-namespace ItemKind {
-	export function rule(name: string): CompletionItem {
-		return {label: name, kind: CompletionItemKind.Function};
-	}
-	export function keyword(name: string): CompletionItem {
-		return {label: name, kind: CompletionItemKind.Enum};
-	}
-	export function type(name: string): CompletionItem {
-		return {label: name, kind: CompletionItemKind.Class};
-	}
-}
-
-class RuleInfo {
-	name: string;
-	item: CompletionItem;
-
-	constructor(name: string) {
-		this.name = name;
-		this.item = ItemKind.rule(name);
-	}
-}
-
-class CacheEntry {
-	rules: Map<string, RuleInfo> = new Map();
-	keywords: Set<string> = new Set();
-	types: Map<string, CompletionItem> = new Map();
-
-	includes: string[] = [];
-	lines: LineInfo[];
-
-	constructor(lines: LineInfo[]) {
-		this.lines = lines;
-	}
-
-	getTokenAt(pos: Position): Token {
-		return this.lines[pos.line].getTokenAt(pos.character);
-	}
-
-	all(): Token[] {
-		return this.lines.map(v => v.tokens).reduce((f, n) => f.concat(n), []);
-	}
-}
-
-let cachedFiles = new Map<string, CacheEntry>();
-
-async function validate(uri: string): Promise<void> {
-	let tok = await tokenize(uri);
+async function validate(document: TextDocument): Promise<void> {
+	let tok = await tokenize(document);
 
 	let lines = tok.map((v, i) => new LineInfo(v, i));
-	let cacheEntry = new CacheEntry(lines);
+	let cacheEntry = new CacheEntry(lines, document.uri);
 
 	let diagnostics: Diagnostic[] = [];
 	let tokens = cacheEntry.all();
@@ -164,44 +98,21 @@ async function validate(uri: string): Promise<void> {
 		takeUnexpected(directives, diagnostics, t => !t.inScope("keyword.control"));
 	}
 
-	removeAll(tokens, t => t.inScope("entity.name.function"))
-		.map(v => new RuleInfo(v.text()))
-		.forEach(k => cacheEntry.rules.set(k.name, k));
-
 	removeAll(tokens, t => t.inScope("entity.name.type"))
 		.map(v => ItemKind.type(v.text()))
 		.forEach(k => cacheEntry.types.set(k.label, k));
 
-	function parseInclude(file: Value) {
-		let p = file.value;
-		if (!path.isAbsolute(p)) {
-			p = Uri.file(path.dirname(Uri.parse(uri).fsPath) + "/" + p).toString();
-		} else {
-			p = Uri.file(file.value).toString();
-		}
-		console.log(p);
-		console.log(uri);
-		console.log(documents.keys());
-	}
+	parseRules(tokens, document.uri).forEach(k => cacheEntry.rules.set(k.name, k));
 
-	let includes = removeAll(tokens, t => t.inScope("meta.tatsu.include"));
-	let include: Token;
-	while (include = takeNext(includes, t => t.inScope("keyword.control"))) {
-		let separator = takeNext(includes, t => t.inScope("separator.directive"));
-		let file = takeValue(includes, diagnostics);
-		if (!file) {
-			let start = separator.range.start;
-			diagnostics.push(error("File path expected", 
-				Range.create(start.line, start.character + 2, start.line + 1, 0)));
-			continue;
-		}
-		parseInclude(file!);
-		takeUnexpected(includes, diagnostics, t => !t.inScope("keyword.control"));
-	}
+	cacheEntry.includes = parseIncludes(tokens, document.uri, (i, range) => {
+		resolveInclude(cacheEntry, i).catch((err) => {
+			diagnose(document.uri, error(err.message, range));
+		});
+	}, diagnostics);
 
-	cachedFiles.set(uri, cacheEntry);
+	cache(document.uri, cacheEntry);
 
-	connection.sendDiagnostics({ uri: uri, diagnostics });
+	connection.sendDiagnostics({ uri: document.uri, diagnostics });
 }
 // connection.onDidChangeWatchedFiles(_change => {});
 
@@ -328,10 +239,40 @@ const CONSTANT_NAMES : CompletionItem[] = [
 	}
 ];
 
-// This handler provides the initial list of the completion items.
-connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[] => {
+async function getRules(cacheEntry: CacheEntry) {
+	let rules: RuleInfo[];
+	try {
+		rules = await resolveRules(cacheEntry);
+	} catch (error) {
+		rules = Array.from(cacheEntry.rules.values());
+	}
+	return rules;
+}
 
-	let cachedFile = cachedFiles.get(position.textDocument.uri);
+export async function resolveInclude(cacheEntry: ExternalCacheEntry, include: string, sentinel: string[] = [cacheEntry.uri]): Promise<RuleInfo[]> {
+	if (sentinel.indexOf(include) !== - 1) {
+		throw new Error("Circular include");
+	}
+	sentinel.push(include);
+	let cache = await getCachedExternal(include);
+	if (!cache) {
+		throw new Error("Unknown file");
+	}
+	return resolveRules(cache, sentinel);
+}
+
+async function resolveRules(cacheEntry: ExternalCacheEntry, sentinel: string[] = [cacheEntry.uri]): Promise<RuleInfo[]> {
+	let result = Array.from(cacheEntry.rules.values());
+	for (let include of cacheEntry.includes) {
+		result = result.concat(await resolveInclude(cacheEntry, include, sentinel));
+	}
+	return result;
+}
+
+// This handler provides the initial list of the completion items.
+connection.onCompletion(async (position: TextDocumentPositionParams): Promise<CompletionItem[]> => {
+
+	let cachedFile = getCached(position.textDocument.uri);
 	if (!cachedFile) {
 		return [];
 	}
@@ -358,9 +299,10 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
 			.map(k => ItemKind.keyword("\"" + k + "\""))
 		);
 	}
-
+	
+	let rules = (await getRules(cachedFile)).map(r => r.item);
 	function suggestRules() {
-		items = items.concat(Array.from(cachedFile!.rules.values()).map(r => r.item));
+		items = items.concat(rules);
 	}
 
 	if (token.inScope("constant") && !token.inScope("constant.other.end")) {

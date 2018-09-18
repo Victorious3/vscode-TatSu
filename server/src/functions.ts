@@ -1,3 +1,5 @@
+import { CompletionItem, CompletionItemKind } from "vscode-languageserver";
+
 // Utility
 export function removeAll<T>(arr: Array<T>, test: (t: T) => boolean): Array<T> {
 	let match: Array<T> = [];
@@ -33,4 +35,20 @@ export function takeWhile<T>(arr: Array<T>, test: (t: T) => boolean): Array<T> {
 
 export function last<T>(arr: Array<T>): T {
     return arr[arr.length - 1];
+}
+
+export function flatten<T>(arr: Array<Array<T>>): Array<T> {
+    return arr.reduce((f, n) => f.concat(n), []);
+}
+
+export namespace ItemKind {
+	export function rule(name: string): CompletionItem {
+		return {label: name, kind: CompletionItemKind.Function};
+	}
+	export function keyword(name: string): CompletionItem {
+		return {label: name, kind: CompletionItemKind.Enum};
+	}
+	export function type(name: string): CompletionItem {
+		return {label: name, kind: CompletionItemKind.Class};
+	}
 }
