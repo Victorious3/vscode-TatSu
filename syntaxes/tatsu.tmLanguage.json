@@ -31,16 +31,12 @@
 		},
 		{
 			"name": "meta.tatsu.include",
-			"begin": "(#include)\\s*(::)",
-			"beginCaptures": {
+			"match": "(#include)\\s*(::)(.*)",
+			"captures": {
 				"1": {"name": "keyword.control.import.tatsu"},
-				"2": {"name": "punctuation.separator.directive.tatsu"}
-			},
-			"end": "\\n",
-			"patterns": [
-				{ "include": "#string" },
-				{ "include": "#unquoted" }
-			]
+				"2": {"name": "punctuation.separator.directive.tatsu"},
+				"3": {"name": "string.quoted.other"}
+			}
 		},
 		{ "include": "#comment" },
 		{

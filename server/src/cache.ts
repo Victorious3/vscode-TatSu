@@ -32,7 +32,7 @@ async function getCachedTextDocument(uri: string): Promise<CachedTextDocument | 
     let doc = new CachedTextDocument(uri, text);
     let tokens = flatten(await tokenize(doc));
 
-    parseRules(tokens, uri).forEach(k => doc.rules.set(k.name, k));
+    doc.rules = parseRules(tokens, uri);
     doc.includes = parseIncludes(tokens, uri);
     
     externalCache.set(uri, doc);
@@ -67,7 +67,7 @@ class CachedTextDocument implements TextDocument, ExternalCacheEntry {
     content: string;
     charCount: number[];
 
-    rules: Map<string, RuleInfo> = new Map();
+    rules: RuleInfo[] = [];
     includes: string[] = [];
 
     constructor(uri: string, content: string) {
@@ -135,17 +135,22 @@ export class RuleInfo {
 		this.item = ItemKind.rule(name);
 		this.uri = uri;
 		this.range = range;
-	}
+    }
+    
+    startToken(): Range {
+        return Range.create(this.range.start, 
+            Position.create(this.range.start.line, this.range.start.character + this.name.length));
+    }
 }
 
 export interface ExternalCacheEntry {
-	rules: Map<string, RuleInfo>;
+	rules: RuleInfo[];
     includes: string[];
     uri: string;
 }
 
 export class CacheEntry implements ExternalCacheEntry {
-	rules: Map<string, RuleInfo> = new Map();
+	rules: RuleInfo[] = [];
 	keywords: Set<string> = new Set();
 	types: Map<string, CompletionItem> = new Map();
 

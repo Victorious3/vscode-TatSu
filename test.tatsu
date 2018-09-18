@@ -1,5 +1,5 @@
 @@keyword :: Some What
 
-#include :: "test2.tatsu"
+# include :: "test.tatsu"
 
 foo::Type = "What";

@@ -98,11 +98,11 @@ async function validate(document: TextDocument): Promise<void> {
 		takeUnexpected(directives, diagnostics, t => !t.inScope("keyword.control"));
 	}
 
-	removeAll(tokens, t => t.inScope("entity.name.type"))
+	tokens.filter(t => t.inScope("entity.name.type"))
 		.map(v => ItemKind.type(v.text()))
 		.forEach(k => cacheEntry.types.set(k.label, k));
 
-	parseRules(tokens, document.uri).forEach(k => cacheEntry.rules.set(k.name, k));
+	cacheEntry.rules = parseRules(tokens, document.uri);
 
 	cacheEntry.includes = parseIncludes(tokens, document.uri, (i, range) => {
 		resolveInclude(cacheEntry, i).catch((err) => {
@@ -244,7 +244,7 @@ async function getRules(cacheEntry: CacheEntry) {
 	try {
 		rules = await resolveRules(cacheEntry);
 	} catch (error) {
-		rules = Array.from(cacheEntry.rules.values());
+		rules = cacheEntry.rules;
 	}
 	return rules;
 }
@@ -262,7 +262,7 @@ export async function resolveInclude(cacheEntry: ExternalCacheEntry, include: st
 }
 
 async function resolveRules(cacheEntry: ExternalCacheEntry, sentinel: string[] = [cacheEntry.uri]): Promise<RuleInfo[]> {
-	let result = Array.from(cacheEntry.rules.values());
+	let result = cacheEntry.rules;
 	for (let include of cacheEntry.includes) {
 		result = result.concat(await resolveInclude(cacheEntry, include, sentinel));
 	}
@@ -342,12 +342,15 @@ connection.onDidOpenTextDocument((params) => {
 	// params.text the initial full content of the document.
 	connection.console.log(`${params.textDocument.uri} opened.`);
 });
+*/
 connection.onDidChangeTextDocument((params) => {
 	// The content of a text document did change in VSCode.
 	// params.uri uniquely identifies the document.
 	// params.contentChanges describe the content changes to the document.
 	connection.console.log(`${params.textDocument.uri} changed: ${JSON.stringify(params.contentChanges)}`);
 });
+
+/*
 connection.onDidCloseTextDocument((params) => {
 	// A text document got closed in VSCode.
 	// params.uri uniquely identifies the document.

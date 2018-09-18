@@ -3,8 +3,8 @@ import * as path from 'path';
 import Uri from 'vscode-uri';
 import { Diagnostic, Range } from "vscode-languageserver";
 
-import { Token, Value, takeValue, error, takeUnexpected } from "./grammar";
-import { removeAll, takeNext } from "./functions";
+import { Token, error, takeUnexpected } from "./grammar";
+import { removeAll, takeNext, takeWhile, last } from "./functions";
 import { RuleInfo } from "./cache";
 
 export function parseIncludes(tokens: Token[], uri: string, 
@@ -12,12 +12,12 @@ export function parseIncludes(tokens: Token[], uri: string,
         
 	let result: string[] = [];
 
-	function parseInclude(file: Value) {
-		let p = file.value;
+	function parseInclude(file: Token) {
+		let p = file.text().replace(/['"]/g, "").trim();
 		if (!path.isAbsolute(p)) {
 			p = Uri.file(path.dirname(Uri.parse(uri).fsPath) + "/" + p).toString();
 		} else {
-			p = Uri.file(file.value).toString();
+			p = Uri.file(p).toString();
 		}
         result.push(p);
         if (onInclude) {
@@ -29,20 +29,28 @@ export function parseIncludes(tokens: Token[], uri: string,
 	let include: Token;
 	while (include = takeNext(includes, t => t.inScope("keyword.control"))) {
 		let separator = takeNext(includes, t => t.inScope("separator.directive"));
-		let file = takeValue(includes, diagnostics);
+		let file = includes[0];
 		if (!file) {
 			let start = separator.range.start;
 			diagnostics.push(error("File path expected", 
 				Range.create(start.line, start.character + 2, start.line + 1, 0)));
 			continue;
 		}
-		parseInclude(file!);
+		includes.splice(0, 1);
+		parseInclude(file);
 		takeUnexpected(includes, diagnostics, t => !t.inScope("keyword.control"));
 	}
 	return result;
 }
 
 export function parseRules(tokens: Token[], uri: string): RuleInfo[] {
-	return removeAll(tokens, t => t.inScope("entity.name.function"))
-		.map(v => new RuleInfo(v.text(), uri, v.range));
+	let result: RuleInfo[] = [];
+	let rules = tokens.filter(t => t.inScope("meta.tatsu.rule-definition"));
+
+	let rule_name: Token;
+	while (rule_name = takeNext(rules, t => t.inScope("entity.name.function"))) {
+		let body = takeWhile(rules, t => !t.inScope("entity.name.function"));
+		result.push(new RuleInfo(rule_name.text(), uri, Range.create(rule_name.range.start, last(body).range.end)));
+	}
+	return result;
 }
