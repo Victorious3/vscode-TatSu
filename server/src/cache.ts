@@ -1,13 +1,12 @@
 import * as fs from 'fs';
 import { TextDocument, Range, Position, CompletionItem } from "vscode-languageserver";
-import { last, flatten } from "./functions";
-import { documents } from "./tatsuServer";
-import { Token, testIn, tokenize } from "./grammar";
-import { ItemKind } from "./functions";
-import { parseRules, parseIncludes } from './parse';
 import Uri from 'vscode-uri';
 
-let externalCache: Map<string, CachedTextDocument> = new Map();
+import { flatten, ItemKind } from "./functions";
+import { Token, testIn, tokenize } from "./grammar";
+import { parseRules, parseIncludes } from './parse';
+
+let externalCache = new Map<string, CacheEntryExt>();
 let internalCache = new Map<string, CacheEntry>();
 
 export function getCached(uri: string): CacheEntry | undefined {
@@ -18,7 +17,11 @@ export function cache(uri: string, entry: CacheEntry) {
     internalCache.set(uri, entry);
 }
 
-async function getCachedTextDocument(uri: string): Promise<CachedTextDocument | undefined> {
+export function remove(uri: string) {
+    internalCache.delete(uri);
+}
+
+async function getExternalTextDocument(uri: string): Promise<ExternalCacheEntry | undefined> {
     let entry = externalCache.get(uri);
     if (entry) {
         return entry;
@@ -29,8 +32,8 @@ async function getCachedTextDocument(uri: string): Promise<CachedTextDocument | 
         return undefined;
     }
     let text = fs.readFileSync(path).toString();
-    let doc = new CachedTextDocument(uri, text);
-    let tokens = flatten(await tokenize(doc));
+    let doc = new CacheEntryExt(TextDocument.create(uri, "source.tatsu", 0, text));
+    let tokens = flatten(await tokenize(doc.document));
 
     doc.rules = parseRules(tokens, uri);
     doc.includes = parseIncludes(tokens, uri);
@@ -44,74 +47,43 @@ export async function getCachedExternal(uri: string): Promise<ExternalCacheEntry
     if (entry) {
         return entry;
     }
-    return getCachedTextDocument(uri);
+    return getExternalTextDocument(uri);
 }
 
 export async function getDocument(uri: string): Promise<TextDocument | undefined> {
-    let doc = documents.get(uri);
-    if (doc) {
+    let cached = internalCache.get(uri);
+    if (cached) {
         if (externalCache.has(uri)) {
             externalCache.delete(uri);
         }
-        return doc;
+        return cached.document;
     }
-    return getCachedTextDocument(uri);
+    let doc = await getExternalTextDocument(uri);
+    if (doc) {
+        return doc.document;
+    }
+    return undefined;
 }
 
-class CachedTextDocument implements TextDocument, ExternalCacheEntry {
-    languageId = "source.tatsu";
-    uri: string;
-    version = 0;
-    lineCount: number;
-
-    content: string;
-    charCount: number[];
-
+class CacheEntryExt implements ExternalCacheEntry {
     rules: RuleInfo[] = [];
     includes: string[] = [];
+    document: TextDocument;
 
-    constructor(uri: string, content: string) {
-        this.uri = uri;
-        this.content = content;
-        this.charCount = this.content.split("\n").map(s => s.length);
-        this.lineCount = this.charCount.length;
-    }
-
-    getText(range: Range): string {
-        return this.content.substring(this.offsetAt(range.start), this.offsetAt(range.end));
-    }
-
-    positionAt(offset: number): Position {
-        for (let i = 0; i < this.lineCount; i++) {
-            if (offset < this.charCount[i]) {
-                return Position.create(i, offset);
-            }
-            offset -= this.charCount[i];
-        }
-        return Position.create(this.lineCount, last(this.charCount));
-    }
-
-    offsetAt(position: Position): number { 
-        let offset = 0;
-        if (position.line >= this.lineCount) {
-            return this.content.length - 1;
-        }
-        for (let i = 0; i < position.line; i++) {
-            offset += this.charCount[i];
-        }
-        offset += position.character;
-        return offset;
+    constructor(document: TextDocument) {
+        this.document = document;
     }
 }
 
 export class LineInfo {
+    ruleStack: string[];
 	tokens: Token[];
-	comments: Range[] = [];
 	line: number;
 
-	constructor(tokens: Token[], line: number) {
+	constructor(ruleStack: string[], tokens: Token[], line: number) {
 		this.line = line;
-		this.tokens = tokens;
+        this.tokens = tokens;
+        this.ruleStack = ruleStack;
 	}
 
 	getTokenAt(char: number): Token {
@@ -146,7 +118,7 @@ export class RuleInfo {
 export interface ExternalCacheEntry {
 	rules: RuleInfo[];
     includes: string[];
-    uri: string;
+    document: TextDocument;
 }
 
 export class CacheEntry implements ExternalCacheEntry {
@@ -156,11 +128,11 @@ export class CacheEntry implements ExternalCacheEntry {
 
 	includes: string[] = [];
 	lines: LineInfo[];
-	uri: string;
+	document: TextDocument;
 
-	constructor(lines: LineInfo[], uri: string) {
+	constructor(lines: LineInfo[], document: TextDocument) {
 		this.lines = lines;
-		this.uri = uri;
+		this.document = document;
 	}
 
 	getTokenAt(pos: Position): Token {

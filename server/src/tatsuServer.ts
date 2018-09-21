@@ -12,31 +12,29 @@ import {
 	Range,
 	DiagnosticSeverity,
 	MarkupContent,
-	TextDocument
+	TextDocument,
+	TextDocumentSyncKind,
+	TextEdit
 } from 'vscode-languageserver';
 
 import { Token, tokenize, takeValues, Value, ValueType, takeUnexpected, error } from './grammar';
 import { removeAll, takeNext, ItemKind } from './functions';
-import { LineInfo, CacheEntry, RuleInfo, cache, getCached, ExternalCacheEntry, getCachedExternal } from './cache';
+import { LineInfo, CacheEntry, RuleInfo, cache, getCached, ExternalCacheEntry, getCachedExternal, remove } from './cache';
 import { parseRules, parseIncludes } from './parse';
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
 let connection = createConnection(ProposedFeatures.all);
 
-// Create a simple text document manager. The text document manager
-// supports full document sync only
-export let documents: TextDocuments = new TextDocuments();
-
 // vscode root directory as transfered by the client
 // this is used to load textmate
 export let vscode_root: string;
-connection.onRequest("vscode-dir", (dir: string) => vscode_root = dir);
+connection.onNotification("vscode-dir", (dir: string) => vscode_root = dir);
 
 connection.onInitialize((params: InitializeParams) => {
 	return {
 		capabilities: {
-			textDocumentSync: documents.syncKind,
+			textDocumentSync: TextDocumentSyncKind.Incremental,
 			// Tell the client that the server supports code completion
 			completionProvider: {
 				resolveProvider: true
@@ -52,17 +50,11 @@ function diagnose(uri: string, diag: Diagnostic) {
 // connection.onInitialized(() => {});
 // connection.onDidChangeConfiguration(change => {});
 
-// The content of a text document has changed. This event is emitted
-// when the text document first opened or when its content has changed.
-documents.onDidChangeContent(change => {
-	validate(change.document);
-});
-
-async function validate(document: TextDocument): Promise<void> {
+async function validate(document: TextDocument): Promise<CacheEntry> {
 	let tok = await tokenize(document);
 
 	let lines = tok.map((v, i) => new LineInfo(v, i));
-	let cacheEntry = new CacheEntry(lines, document.uri);
+	let cacheEntry = new CacheEntry(lines, document);
 
 	let diagnostics: Diagnostic[] = [];
 	let tokens = cacheEntry.all();
@@ -113,6 +105,8 @@ async function validate(document: TextDocument): Promise<void> {
 	cache(document.uri, cacheEntry);
 
 	connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+	return cacheEntry;
 }
 // connection.onDidChangeWatchedFiles(_change => {});
 
@@ -249,7 +243,9 @@ async function getRules(cacheEntry: CacheEntry) {
 	return rules;
 }
 
-export async function resolveInclude(cacheEntry: ExternalCacheEntry, include: string, sentinel: string[] = [cacheEntry.uri]): Promise<RuleInfo[]> {
+export async function resolveInclude(cacheEntry: ExternalCacheEntry, include: string, 
+	sentinel: string[] = [cacheEntry.document.uri]): Promise<RuleInfo[]> {
+
 	if (sentinel.indexOf(include) !== - 1) {
 		throw new Error("Circular include");
 	}
@@ -261,7 +257,9 @@ export async function resolveInclude(cacheEntry: ExternalCacheEntry, include: st
 	return resolveRules(cache, sentinel);
 }
 
-async function resolveRules(cacheEntry: ExternalCacheEntry, sentinel: string[] = [cacheEntry.uri]): Promise<RuleInfo[]> {
+async function resolveRules(cacheEntry: ExternalCacheEntry, 
+	sentinel: string[] = [cacheEntry.document.uri]): Promise<RuleInfo[]> {
+
 	let result = cacheEntry.rules;
 	for (let include of cacheEntry.includes) {
 		result = result.concat(await resolveInclude(cacheEntry, include, sentinel));
@@ -335,32 +333,22 @@ connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
 	return item;
 });
 
-/*
-connection.onDidOpenTextDocument((params) => {
-	// A text document got opened in VSCode.
-	// params.uri uniquely identifies the document. For documents store on disk this is a file URI.
-	// params.text the initial full content of the document.
-	connection.console.log(`${params.textDocument.uri} opened.`);
-});
-*/
-connection.onDidChangeTextDocument((params) => {
-	// The content of a text document did change in VSCode.
-	// params.uri uniquely identifies the document.
-	// params.contentChanges describe the content changes to the document.
-	connection.console.log(`${params.textDocument.uri} changed: ${JSON.stringify(params.contentChanges)}`);
+connection.onDidOpenTextDocument(async (params) => {
+	let item = params.textDocument;
+	let doc = TextDocument.create(item.uri, item.languageId, item.version, item.text);
+	cache(params.textDocument.uri, await validate(doc));
 });
 
-/*
+connection.onDidChangeTextDocument(async (params) => {
+	let cached = await getCached(params.textDocument.uri)!.document;
+	TextDocument.applyEdits(cached, 
+		params.contentChanges.map(change => 
+			TextEdit.replace(change.range!, change.text)));
+});
+
 connection.onDidCloseTextDocument((params) => {
-	// A text document got closed in VSCode.
-	// params.uri uniquely identifies the document.
-	connection.console.log(`${params.textDocument.uri} closed.`);
+	remove(params.textDocument.uri);
 });
-*/
-
-// Make the text document manager listen on the connection
-// for open, change and close text document events
-documents.listen(connection);
 
 // Listen on the connection
 connection.listen();
