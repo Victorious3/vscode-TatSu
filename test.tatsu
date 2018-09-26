@@ -1,5 +1,13 @@
-@@keyword :: Some What
+@@keyword :: Some What Where
 
 # include :: "test.tatsu"
 
-foo::Type = "What";
+stmt = stmt_vardecl | stmt_typedecl | stmt_if | stmt_def | stmt_static_if | stmt_pragma | stmt_for_loop |
+    stmt_while_loop | stmt_loop | stmt_return | stmt_continue | stmt_break | stmt_goto;
+
+stmt_def::Def::Statement = 
+    [share: share_marker n_]
+    "def" n_ ~ name: identifier 
+    ['(' ~ args:','.{def_arg} ')'] 
+    ['->' returns: ','.{return_type}]
+    [body: def_body];

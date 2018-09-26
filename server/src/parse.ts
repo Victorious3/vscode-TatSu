@@ -50,7 +50,8 @@ export function parseRules(tokens: Token[], uri: string): RuleInfo[] {
 	let rule_name: Token;
 	while (rule_name = takeNext(rules, t => t.inScope("entity.name.function"))) {
 		let body = takeWhile(rules, t => !t.inScope("entity.name.function"));
-		result.push(new RuleInfo(rule_name.text(), uri, Range.create(rule_name.range.start, last(body).range.end)));
+		let endToken = body.length > 0 ? last(body): rule_name;
+		result.push(new RuleInfo(rule_name.text(), uri, Range.create(rule_name.range.start, endToken.range.end)));
 	}
 	return result;
 }

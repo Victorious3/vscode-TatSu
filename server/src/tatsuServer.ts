@@ -2,7 +2,6 @@
 
 import {
 	createConnection,
-	TextDocuments,
 	Diagnostic,
 	ProposedFeatures,
 	InitializeParams,
@@ -17,9 +16,9 @@ import {
 	TextEdit
 } from 'vscode-languageserver';
 
-import { Token, tokenize, takeValues, Value, ValueType, takeUnexpected, error } from './grammar';
+import { Token, tokenize, takeValues, Value, ValueType, takeUnexpected, error, reTokenize } from './grammar';
 import { removeAll, takeNext, ItemKind } from './functions';
-import { LineInfo, CacheEntry, RuleInfo, cache, getCached, ExternalCacheEntry, getCachedExternal, remove } from './cache';
+import { CacheEntry, RuleInfo, cache, getCached, ExternalCacheEntry, getCachedExternal, remove } from './cache';
 import { parseRules, parseIncludes } from './parse';
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
@@ -50,14 +49,14 @@ function diagnose(uri: string, diag: Diagnostic) {
 // connection.onInitialized(() => {});
 // connection.onDidChangeConfiguration(change => {});
 
-async function validate(document: TextDocument): Promise<CacheEntry> {
-	let tok = await tokenize(document);
-
-	let lines = tok.map((v, i) => new LineInfo(v, i));
-	let cacheEntry = new CacheEntry(lines, document);
-
+// TODO This currently revalidates the entire document
+// We can make sure that we only do the changes needed
+async function reValidate(cacheEntry: CacheEntry) {
 	let diagnostics: Diagnostic[] = [];
 	let tokens = cacheEntry.all();
+	let document = cacheEntry.document;
+
+	cacheEntry.clear();
 
 	function parseDirective(name: string, args: Value[]) {
 		if (name === "@@keyword") {
@@ -102,10 +101,15 @@ async function validate(document: TextDocument): Promise<CacheEntry> {
 		});
 	}, diagnostics);
 
-	cache(document.uri, cacheEntry);
-
 	connection.sendDiagnostics({ uri: document.uri, diagnostics });
+}
 
+async function validate(document: TextDocument): Promise<CacheEntry> {
+	let lines = await tokenize(document);
+	let cacheEntry = new CacheEntry(lines, document);
+
+	reValidate(cacheEntry);
+	
 	return cacheEntry;
 }
 // connection.onDidChangeWatchedFiles(_change => {});
@@ -269,11 +273,7 @@ async function resolveRules(cacheEntry: ExternalCacheEntry,
 
 // This handler provides the initial list of the completion items.
 connection.onCompletion(async (position: TextDocumentPositionParams): Promise<CompletionItem[]> => {
-
-	let cachedFile = getCached(position.textDocument.uri);
-	if (!cachedFile) {
-		return [];
-	}
+	let cachedFile = await getCached(position.textDocument.uri);
 
 	let lineinfo = cachedFile.lines[position.position.line];
 	let start_pos = position.position.character;
@@ -336,14 +336,25 @@ connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
 connection.onDidOpenTextDocument(async (params) => {
 	let item = params.textDocument;
 	let doc = TextDocument.create(item.uri, item.languageId, item.version, item.text);
+
 	cache(params.textDocument.uri, await validate(doc));
 });
 
 connection.onDidChangeTextDocument(async (params) => {
-	let cached = await getCached(params.textDocument.uri)!.document;
-	TextDocument.applyEdits(cached, 
-		params.contentChanges.map(change => 
-			TextEdit.replace(change.range!, change.text)));
+	let cached = await getCached(params.textDocument.uri);
+
+	for (let change of params.contentChanges) {
+		let text = TextDocument.applyEdits(cached.document, [TextEdit.replace(change.range!, change.text)]);
+		(cached.document as any).update({text: text}, cached.document.version + 1);
+	}
+	
+	// Reparse affected lines
+	for (let change of params.contentChanges) {
+		let lines = change.text.split("\n").length;
+		await reTokenize(change.range!, lines, cached);
+	}
+
+	await reValidate(cached);
 });
 
 connection.onDidCloseTextDocument((params) => {

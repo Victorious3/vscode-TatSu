@@ -1,11 +1,9 @@
 import * as fs from 'fs';
 import { Range, Diagnostic, DiagnosticSeverity, TextDocument, Position} from 'vscode-languageserver';
-import { removeAll, takeWhile, last } from './functions';
+import { removeAll, takeWhile, last, sleep } from './functions';
 import { vscode_root } from './tatsuServer';
-
-function sleep(ms: any) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+import { LineInfo, ExternalCacheEntry } from './cache';
+let equal = require('array-equal');
 
 /**
  * Returns a node module installed with VSCode
@@ -107,18 +105,53 @@ export class Value {
     }
 }
 
-export async function tokenize(document: TextDocument): Promise<Token[][]> {
+export async function tokenize(document: TextDocument): Promise<LineInfo[]> {
     let grammar = await getGrammar();
 
-    var ruleStack: any;
-    var tokens: Token[][] = [];
+    let ruleStack: any;
+    let lines: LineInfo[] = [];
     for (let i = 0; i < document.lineCount; i++) {
         let line = document.getText(Range.create(i, 0, i + 1, 0));
-        var r = grammar.tokenizeLine(line, ruleStack!);
-	    tokens.push(r.tokens.map((v: any) => Token.create(v, i, document)));
+        let r = grammar.tokenizeLine(line, ruleStack!);
+	    lines.push(new LineInfo(ruleStack, r.tokens.map((v: any) => Token.create(v, i, document)), i));
 	    ruleStack = r.ruleStack;
     }
-    return tokens;
+    return lines;
+}
+
+export async function reTokenize(range: Range, lines: number, entry: ExternalCacheEntry) {
+    let grammar = await getGrammar();
+    let doc = entry.document;
+
+    function reTokenizeLine(i: number) {
+        let line = doc.getText(Range.create(i, 0, i + 1, 0));
+        let r = grammar.tokenizeLine(line, ruleStack!);
+        let li = new LineInfo(ruleStack, r.tokens.map((v: any) => Token.create(v, i, doc)), i);
+        ruleStack = r.ruleStack;
+        return li;
+    }
+
+    // Remove affected lines
+    entry.lines.splice(range.start.line, range.end.line - range.start.line + 1);
+
+    let firstLine = entry.lines[range.start.line - 1];
+    let ruleStack: any = firstLine ? firstLine.ruleStack : undefined;
+
+    let i = range.start.line;
+    for (;i <= range.start.line + lines; i++) {
+        entry.lines.splice(i, 0, reTokenizeLine(i));
+    }
+
+    // From here on we update all lines until the rule stack doesn't change anymore
+    while (i < doc.lineCount) {
+        let line = entry.lines[i - 1];
+        if (line && equal(line.ruleStack, ruleStack)) { // and end up in the same state again
+            break; // we can stop parsing
+        }
+
+        entry.lines[i] = reTokenizeLine(i);
+        i++; // next line
+    }
 }
 
 export function rangeOver(tokens: Token[]): Range {

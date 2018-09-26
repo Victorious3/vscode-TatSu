@@ -9,6 +9,7 @@
 		"app-module-path": "^2.2.0",
 		"vscode-uri": "^1.0.6",
 		"vscode-languageserver": "^5.1.0",
+		"array-equal": "^1.0.0", 
 		"xregexp": "^4.2.0",
 		"@types/xregexp": "^3.0.29"
 	}

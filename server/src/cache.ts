@@ -2,16 +2,12 @@ import * as fs from 'fs';
 import { TextDocument, Range, Position, CompletionItem } from "vscode-languageserver";
 import Uri from 'vscode-uri';
 
-import { flatten, ItemKind } from "./functions";
+import { flatten, ItemKind, sleep } from "./functions";
 import { Token, testIn, tokenize } from "./grammar";
 import { parseRules, parseIncludes } from './parse';
 
-let externalCache = new Map<string, CacheEntryExt>();
+let externalCache = new Map<string, ExternalCacheEntry>();
 let internalCache = new Map<string, CacheEntry>();
-
-export function getCached(uri: string): CacheEntry | undefined {
-    return internalCache.get(uri);
-}
 
 export function cache(uri: string, entry: CacheEntry) {
     internalCache.set(uri, entry);
@@ -19,6 +15,18 @@ export function cache(uri: string, entry: CacheEntry) {
 
 export function remove(uri: string) {
     internalCache.delete(uri);
+}
+
+export async function getCached(uri: string): Promise<CacheEntry> {
+    let cached: CacheEntry | undefined;
+    while ((cached = getCachedSync(uri)) === undefined) {
+        await sleep(200); // Delay loop to wait for the initial parsing
+    }
+    return cached;
+}
+
+export function getCachedSync(uri: string): CacheEntry | undefined {
+    return internalCache.get(uri);
 }
 
 async function getExternalTextDocument(uri: string): Promise<ExternalCacheEntry | undefined> {
@@ -32,18 +40,20 @@ async function getExternalTextDocument(uri: string): Promise<ExternalCacheEntry 
         return undefined;
     }
     let text = fs.readFileSync(path).toString();
-    let doc = new CacheEntryExt(TextDocument.create(uri, "source.tatsu", 0, text));
-    let tokens = flatten(await tokenize(doc.document));
+    let doc = TextDocument.create(uri, "source.tatsu", 0, text);
+    let cacheEntry = new ExternalCacheEntry(await tokenize(doc), doc);
+    let tokens = cacheEntry.all();
 
-    doc.rules = parseRules(tokens, uri);
-    doc.includes = parseIncludes(tokens, uri);
+    cacheEntry.rules = parseRules(tokens, uri);
+    cacheEntry.includes = parseIncludes(tokens, uri);
     
-    externalCache.set(uri, doc);
-    return doc;
+    externalCache.set(uri, cacheEntry);
+
+    return cacheEntry;
 }
 
 export async function getCachedExternal(uri: string): Promise<ExternalCacheEntry | undefined> {
-    let entry: ExternalCacheEntry | undefined = getCached(uri);
+    let entry: ExternalCacheEntry | undefined = getCachedSync(uri);
     if (entry) {
         return entry;
     }
@@ -63,16 +73,6 @@ export async function getDocument(uri: string): Promise<TextDocument | undefined
         return doc.document;
     }
     return undefined;
-}
-
-class CacheEntryExt implements ExternalCacheEntry {
-    rules: RuleInfo[] = [];
-    includes: string[] = [];
-    document: TextDocument;
-
-    constructor(document: TextDocument) {
-        this.document = document;
-    }
 }
 
 export class LineInfo {
@@ -115,31 +115,37 @@ export class RuleInfo {
     }
 }
 
-export interface ExternalCacheEntry {
-	rules: RuleInfo[];
-    includes: string[];
-    document: TextDocument;
-}
-
-export class CacheEntry implements ExternalCacheEntry {
+export class ExternalCacheEntry {
 	rules: RuleInfo[] = [];
-	keywords: Set<string> = new Set();
-	types: Map<string, CompletionItem> = new Map();
+    includes: string[] = [];
+    lines: LineInfo[];
+    document: TextDocument;
 
-	includes: string[] = [];
-	lines: LineInfo[];
-	document: TextDocument;
-
-	constructor(lines: LineInfo[], document: TextDocument) {
+    constructor(lines: LineInfo[], document: TextDocument) {
 		this.lines = lines;
 		this.document = document;
-	}
-
-	getTokenAt(pos: Position): Token {
+    }
+    
+    getTokenAt(pos: Position): Token {
 		return this.lines[pos.line].getTokenAt(pos.character);
 	}
 
-	all(): Token[] {
+    all(): Token[] {
 		return flatten(this.lines.map(v => v.tokens));
 	}
+}
+
+export class CacheEntry extends ExternalCacheEntry {
+	rules: RuleInfo[] = [];
+	keywords: Set<string> = new Set();
+	types: Map<string, CompletionItem> = new Map();
+    includes: string[] = [];
+    
+
+    clear() {
+        this.rules = [];  
+        this.keywords = new Set();
+        this.types = new Map();
+        this.includes = [];
+    }
 }

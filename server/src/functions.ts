@@ -1,5 +1,9 @@
 import { CompletionItem, CompletionItemKind } from "vscode-languageserver";
 
+export function sleep(ms: any) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Utility
 export function removeAll<T>(arr: Array<T>, test: (t: T) => boolean): Array<T> {
 	let match: Array<T> = [];
