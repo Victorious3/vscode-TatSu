@@ -31,7 +31,7 @@ export let documents: TextDocuments = new TextDocuments();
 // vscode root directory as transfered by the client
 // this is used to load textmate
 export let vscode_root: string;
-connection.onRequest("vscode-dir", (dir: string) => vscode_root = dir);
+connection.onNotification("vscode-dir", (dir: string) => vscode_root = dir);
 
 connection.onInitialize((params: InitializeParams) => {
 	return {

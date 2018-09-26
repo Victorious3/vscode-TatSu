@@ -57,7 +57,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Send vscode directory
 	await client.onReady();
-	client.sendRequest("vscode-dir", vscode.env.appRoot);
+	client.sendNotification("vscode-dir", vscode.env.appRoot);
 }
 
 export async function deactivate(): Promise<void> {
