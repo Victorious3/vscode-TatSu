@@ -19,10 +19,10 @@ export function parseIncludes(tokens: Token[], uri: string,
 		} else {
 			p = Uri.file(p).toString();
 		}
-        result.push(p);
-        if (onInclude) {
-            onInclude(p, file.range);
-        }
+		result.push(p);
+		if (onInclude) {
+			onInclude(p, file.range);
+		}
 	}
 
 	let includes = removeAll(tokens, t => t.inScope("meta.tatsu.include"));
@@ -50,7 +50,8 @@ export function parseRules(tokens: Token[], uri: string): RuleInfo[] {
 	let rule_name: Token;
 	while (rule_name = takeNext(rules, t => t.inScope("entity.name.function"))) {
 		let body = takeWhile(rules, t => !t.inScope("entity.name.function"));
-		result.push(new RuleInfo(rule_name.text(), uri, Range.create(rule_name.range.start, last(body).range.end)));
+		let lastToken = body.length > 0 ? last(body): rule_name;
+		result.push(new RuleInfo(rule_name.text(), uri, Range.create(rule_name.range.start, lastToken.range.end)));
 	}
 	return result;
 }
